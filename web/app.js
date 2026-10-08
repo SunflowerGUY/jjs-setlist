@@ -346,7 +346,8 @@ async function api(method, path, body, timeout = 8000) {
 
 /** Is the helper running? */
 async function findHelper() {
-  if (!/^https?:$/.test(location.protocol)) return false;
+  // The helper only ever runs on this computer (http://localhost:8765/), not on a website.
+  if (!/^https?:$/.test(location.protocol) || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return false;
   try {
     const info = await api('GET', 'ping', undefined, 1500);
     if (info.app !== 'jjs-setlist') return false;
