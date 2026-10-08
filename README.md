@@ -155,7 +155,13 @@ Setlists kept in the browser only can be moved with *File ▸ Export This Setlis
 
 ## Online accounts
 
-Optional. Turn them on and each person can **sign in with any email address and a password**, or with Google, and keep their own song library, settings and setlists, separate from everyone else's. Nobody can see another person's data: the database itself refuses (see `firestore.rules`). Signing in is from the **account button** at the top right. It offers to copy the setlists already on that computer into the new account. Signing out clears that person's copy from the browser. *Delete my account* removes the account and everything in it.
+Optional. Turn them on and people sign in with **any email address and a password**, or with Google, from the **account button** at the top right. Signing out clears that person's copy from the browser.
+
+**By invitation, with bands.** Signing up needs an **invitation code** from the administrator, and the code also says which **band** the person joins. On the Sign in window, new people type the code under *New here?*. It shows the band's name. Then they choose an email and password. People without a code can **Request an invitation code** (name and email), which the administrator sees and answers by hand.
+
+- **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours and text size stay personal; a band's Google Drive link is shared.
+- **The administrator** (account menu ▸ *Bands & invitation codes*) creates bands (names that are the same apart from spaces, capitals or punctuation, like *Jelly Jazz* / *The Jelly-Jazz*, are caught), copies a band's invitation to send, **revokes** the code once everyone has joined (members keep access), makes new codes, and removes members. *Invitation requests* lists who has asked, with a button to email them the band's invitation.
+- **Nobody can see anything they shouldn't:** the database rules (`firestore.rules`) give a login made without a code no access at all, keep each person's own setlists private, let only a band's members into the band, and let only the administrator manage bands, codes and requests.
 
 It runs on **Firebase** (Google's free service for this; the free plan easily covers a group of friends). To set it up, once:
 
@@ -164,6 +170,7 @@ It runs on **Firebase** (Google's free service for this; the free plan easily co
 3. **Firestore Database ▸ Create database:** location closest to you, e.g. **australia-southeast2 (Melbourne)**, *production mode*. Then **Rules:** replace the text with the contents of **`firestore.rules`** and **Publish**.
 4. **Project settings ▸ General ▸ Your apps ▸ Web (`</>`):** register an app, copy its `firebaseConfig` values into **`web/firebase-config.js`** (instructions inside).
 5. When the app is hosted online (e.g. GitHub Pages), add its address under **Authentication ▸ Settings ▸ Authorized domains**. `localhost` is there already.
+6. **Make yourself the administrator:** sign up once (or use an existing account), find your **User UID** under **Authentication ▸ Users**, then in **Firestore Database ▸ Data** click **Start collection**: collection ID `admins`, document ID = your User UID, one field `email` (string) = your email address. Do this **before** publishing the rules, or your own account is shut out like a stranger's.
 
 With `web/firebase-config.js` left as `null`, accounts are off and the app works exactly as before.
 

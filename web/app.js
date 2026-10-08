@@ -58,8 +58,8 @@ const store = {
       return v === null ? fallback : JSON.parse(v);
     } catch { return fallback; }
   },
-  set(key, value) {
-    try { localStorage.setItem(this.prefix + key, JSON.stringify(value)); return true; }
+  set(key, value, prefix = this.prefix) {
+    try { localStorage.setItem(prefix + key, JSON.stringify(value)); return true; }
     catch { return false; }
   },
   /** Remove everything kept under a prefix (e.g. an account's area on sign-out). */
@@ -395,7 +395,7 @@ function setlists() { return mode === 'browser' ? store.get('setlists', {}) : sa
 
 async function putSetlist(key, data) {
   if (mode === 'cloud') {
-    await cloudWrite(cloudUser().collection('setlists').doc(key), data);
+    await cloudWrite(cloudRoot().collection('setlists').doc(key), data);
     savedSetlists[key] = data;
   } else if (mode === 'files') {
     await api('PUT', 'setlists/' + encodeURIComponent(key), data);
@@ -411,7 +411,7 @@ async function putSetlist(key, data) {
 
 async function removeSetlist(key) {
   if (mode === 'cloud') {
-    await cloudWrite(cloudUser().collection('setlists').doc(key), null);
+    await cloudWrite(cloudRoot().collection('setlists').doc(key), null);
     delete savedSetlists[key];
   } else if (mode === 'files') {
     await api('DELETE', 'setlists/' + encodeURIComponent(key));
@@ -424,14 +424,16 @@ async function removeSetlist(key) {
 }
 
 function whereSaved() {
-  return { cloud: 'in your account', files: 'in the setlists folder', browser: 'in this browser' }[mode];
+  return { cloud: `in ${spaceName()}`, files: 'in the setlists folder', browser: 'in this browser' }[mode];
 }
 
 function renderStorage() {
   const el = $('#storageLabel');
   if (mode === 'cloud') {
-    el.textContent = '☁ Saving to your account';
-    el.title = `Signed in as ${cloud.user.email || cloud.user.displayName || 'you'}.\nYour settings, song library and setlists are kept in your account, separate from everyone else's.`;
+    el.textContent = cloud.band ? `☁ Saving to ${cloud.band.name}` : '☁ Saving to your account';
+    el.title = cloud.band
+      ? `Signed in as ${accountName()}.\nThe song library and setlists are ${cloud.band.name}'s, shared with its members.\nSwitch with the band list at the top right.`
+      : `Signed in as ${accountName()}.\nYour own song library and setlists, kept in your account - nobody else can see them.`;
   } else if (mode === 'files') {
     el.textContent = '💾 Saving to files in the project folder';
     el.title = `Settings: config.json\nSaved setlists: setlists\\\nFolder: ${files.folder}`;
@@ -455,8 +457,12 @@ function saveSettings() {
   store.set('settings', { fontSize: state.fontSize, colours: state.colours,
     driveUrl: state.driveUrl, driveFirst: state.driveFirst });
   if (mode === 'cloud') {
-    cloudWrite(cloudUser().collection('data').doc('settings'), settingsData(), { merge: true })
-      .catch((err) => messageBox('Could not save settings', `Your settings couldn't be saved to your account:\n\n${err.message}`));
+    // Colours and text size are always mine; the Google Drive link belongs to the open space.
+    const mine = { library_colours: state.colours, web_font_size: state.fontSize };
+    const drive = { backup_url: state.driveUrl || null, drive_first: state.driveFirst };
+    const failed = (err) => messageBox('Could not save settings', `The settings couldn't be saved:\n\n${err.message}`);
+    cloudWrite(cloudUserDoc().collection('data').doc('settings'), cloud.band ? mine : { ...mine, ...drive }, { merge: true }).catch(failed);
+    if (cloud.band) cloudWrite(cloudRoot().collection('data').doc('settings'), drive, { merge: true }).catch(failed);
   } else if (mode === 'files') {
     api('PUT', 'config', settingsData())
       .catch((err) => messageBox('Could not save settings', `config.json couldn't be saved:\n\n${err.message}`));
@@ -467,10 +473,10 @@ function saveSettings() {
 async function saveLibrary(library) {
   if (mode === 'cloud') {
     try {
-      await cloudWrite(cloudUser().collection('data').doc('library'), library);
+      await cloudWrite(cloudRoot().collection('data').doc('library'), library);
       return true;
     } catch (err) {
-      messageBox('Could not save the song library', `It couldn't be saved to your account:\n\n${err.message}`);
+      messageBox('Could not save the song library', `It couldn't be saved to ${spaceName()}:\n\n${err.message}`);
       return false;
     }
   }
@@ -478,11 +484,19 @@ async function saveLibrary(library) {
 }
 
 // ---------------------------------------------------------------- online accounts (Firebase)
-// Turned on by web/firebase-config.js. Sign in with email + password (any email
-// address) or Google. Each person's data lives under users/{their id}/ in the
-// database, and firestore.rules lets only them read or change it.
-const cloud = { enabled: false, auth: null, db: null, user: null, emulator: false };
+// Turned on by web/firebase-config.js. Sign-up needs an invitation code from the
+// administrator; the code also says which band the new member joins. Each person
+// has a personal space (users/{id}/) and can switch to any band they're in
+// (bands/{id}/). firestore.rules enforces who may read or change what.
+const cloud = {
+  enabled: false, auth: null, db: null, user: null, emulator: false,
+  admin: false,                              // the app's administrator (admins/{uid} exists)
+  bands: [],                                 // the bands I can open: [{ id, name }]
+  band: null,                                // the band open now, or null for my own space
+  busy: false,                               // signing in / up: don't reload on the auth change yet
+};
 const CLOUD_TIMEOUT = 4000;                  // ms before a save is reported as "will upload later"
+const SITE_URL = 'https://sunflowerguy.github.io/jjs-setlist/';
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -520,6 +534,7 @@ async function initCloud() {
     });
     // Signing in or out (here, or in another tab) reopens the app in the right mode.
     cloud.auth.onAuthStateChanged((user) => {
+      if (cloud.busy) return;
       if ((user?.uid || null) !== (cloud.user?.uid || null)) location.reload();
     });
   } catch (err) {
@@ -529,7 +544,13 @@ async function initCloud() {
   }
 }
 
-function cloudUser() { return cloud.db.collection('users').doc(cloud.user.uid); }
+const now = () => firebase.firestore.FieldValue.serverTimestamp();
+function cloudUserDoc() { return cloud.db.collection('users').doc(cloud.user.uid); }
+/** Where the open space's library, settings and setlists live. */
+function cloudRoot() { return cloud.band ? cloud.db.collection('bands').doc(cloud.band.id) : cloudUserDoc(); }
+function spaceName() { return cloud.band ? cloud.band.name : 'your account'; }
+/** This account's area in the browser (its spaces are inside it). */
+function accountPrefix(uid = cloud.user.uid) { return `${BASE_PREFIX}u.${uid}.`; }
 
 /** Save (data) or delete (null) a document. Offline, it's kept in this browser
     and uploaded when the connection is back - say so rather than wait.
@@ -542,8 +563,8 @@ async function cloudWrite(ref, data, options) {
     const result = await Promise.race([write, slow]);
     cloudQueued = result === 'queued';
     if (cloudQueued) {
-      status('Saved in this browser - it will be uploaded to your account when the connection is back.');
-      write.then(() => { cloudQueued = false; status('Your changes have now been uploaded to your account.'); }, () => {});
+      status(`Saved in this browser - it will be uploaded to ${spaceName()} when the connection is back.`);
+      write.then(() => { cloudQueued = false; status(`Your changes have now been uploaded to ${spaceName()}.`); }, () => {});
     }
     return result;
   } catch (err) {
@@ -551,27 +572,74 @@ async function cloudWrite(ref, data, options) {
   }
 }
 
-async function cloudSetlists() {
-  const snap = await cloudUser().collection('setlists').get();
+async function cloudSetlists(root = cloudRoot()) {
+  const snap = await root.collection('setlists').get();
   const found = {};
   snap.forEach((doc) => { if (Array.isArray(doc.data().sets)) found[doc.id] = doc.data(); });
   return found;
 }
 
-/** Use the signed-in account: its own area in this browser, then its saved data. */
+/** Is this login allowed in? The administrator, or signed up with an invitation code. */
+async function accountStatus(user = cloud.user) {
+  const [adminDoc, regDoc] = await Promise.all([
+    cloud.db.collection('admins').doc(user.uid).get(),
+    cloud.db.collection('registered').doc(user.uid).get(),
+  ]);
+  return { admin: adminDoc.exists, registered: adminDoc.exists || regDoc.exists };
+}
+
+/** Open the signed-in account: its bands, the space chosen last time, and that space's data. */
 async function loadCloudData() {
-  store.prefix = `${BASE_PREFIX}u.${cloud.user.uid}.`;
-  loadLocalState();                          // the unsaved setlist on screen, kept per account
-  const [settingsDoc, libraryDoc, lists] = await Promise.all([
-    cloudUser().collection('data').doc('settings').get(),
-    cloudUser().collection('data').doc('library').get(),
-    cloudSetlists(),
+  const { admin, registered } = await accountStatus();
+  if (!registered) {
+    const err = new Error('not registered');
+    err.code = 'jjs/not-registered';
+    throw err;
+  }
+  cloud.admin = admin;
+  // My bands. The administrator can open every band.
+  const mine = await cloudUserDoc().collection('bands').get();
+  const bands = new Map();
+  mine.forEach((d) => bands.set(d.id, d.data().name || d.id));
+  if (admin) (await cloud.db.collection('bands').get()).forEach((d) => bands.set(d.id, d.data().name || d.id));
+  cloud.bands = [...bands].map(([id, name]) => ({ id, name })).sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+  if (admin) pendingRequests().then((n) => { cloud.requests = n; renderAccount(); });
+
+  // The space chosen last time on this computer - if I'm still in that band.
+  const wanted = store.get('space', '', accountPrefix());
+  cloud.band = cloud.bands.find((b) => b.id === wanted) || null;
+  if (cloud.band) {
+    try {
+      await cloud.db.collection('bands').doc(cloud.band.id).get();
+    } catch {                                 // removed from the band since
+      const gone = cloud.band;
+      cloud.band = null;
+      cloud.bands = cloud.bands.filter((b) => b.id !== gone.id);
+      cloudUserDoc().collection('bands').doc(gone.id).delete().catch(() => {});
+      store.set('space', '', accountPrefix());
+      cloud.notice = ['No longer in the band', `You're no longer a member of ${gone.name}, so your own setlists are open instead.`];
+    }
+  }
+  store.prefix = accountPrefix() + (cloud.band ? `b.${cloud.band.id}.` : '');
+  loadLocalState();                          // the unsaved setlist on screen, kept per account and space
+
+  const root = cloudRoot();
+  const [mySettings, spaceSettings, libraryDoc, lists] = await Promise.all([
+    cloudUserDoc().collection('data').doc('settings').get(),
+    root.collection('data').doc('settings').get(),
+    root.collection('data').doc('library').get(),
+    cloudSetlists(root),
   ]);
   savedSetlists = lists;
-  if (settingsDoc.exists) applyConfig(settingsDoc.data());
-  else applyConfig({});
+  // Colours and text size are always mine; the Google Drive link belongs to the space.
+  const mine2 = mySettings.exists ? mySettings.data() : {};
+  const space = spaceSettings.exists ? spaceSettings.data() : {};
+  applyConfig({ library_colours: mine2.library_colours, web_font_size: mine2.web_font_size,
+    ...('backup_url' in space ? { backup_url: space.backup_url } : {}),
+    ...('drive_first' in space ? { drive_first: space.drive_first } : {}) });
   useLibraryData(libraryDoc.exists ? libraryDoc.data() : null);
-  return !settingsDoc.exists && !libraryDoc.exists && !Object.keys(lists).length;   // a brand-new account
+  // A brand-new personal space (nothing saved yet).
+  return !cloud.band && !mySettings.exists && !libraryDoc.exists && !Object.keys(lists).length;
 }
 
 /** Friendly words for Firebase's error codes. */
@@ -596,12 +664,84 @@ function cloudMessage(err) {
     'auth/requires-recent-login': 'For safety, please sign out, sign in again, and then try once more.',
     'auth/user-disabled': 'This account has been switched off.',
     'auth/operation-not-allowed': 'This way of signing in has not been switched on for JJ\'s Setlist yet.',
-    'permission-denied': "Your account isn't allowed to do that (try signing out and in again).",
-    'unavailable': "Couldn't connect to your account. Check the internet connection.",
+    'jjs/not-registered': "There's no JJ's Setlist account for that login. New members sign up with an invitation code from the administrator.",
+    'permission-denied': "That isn't allowed for your account (if an invitation code was used, it may have been withdrawn).",
+    'unavailable': "Couldn't connect. Check the internet connection.",
   }[code] || err?.message || String(err);
 }
 
-// ---------------------------------------------------------------- account: sign in, menu, copy data
+// ---------------------------------------------------------------- invitation codes
+const CODE_LETTERS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';   // no 0/O, 1/I/L - easy to read out
+
+/** A new random code like JAZZ-7K2Q-M4XP: 12 characters, too many to guess. */
+function newInviteCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const chars = [...bytes].map((b) => CODE_LETTERS[b % CODE_LETTERS.length]).join('');
+  return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8)}`;
+}
+
+/** Tidy a typed code: capitals, no spaces, dashes every 4 characters. */
+function normaliseCode(text) {
+  const c = String(text || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return c.match(/.{1,4}/g)?.join('-') || '';
+}
+
+/** The band an invitation code is for, or null if it isn't a current code. */
+async function lookUpCode(text) {
+  const code = normaliseCode(text);
+  if (code.length !== 14) return null;
+  try {
+    const doc = await cloud.db.collection('invites').doc(code).get();
+    return doc.exists ? { code, bandId: doc.data().bandId, bandName: doc.data().bandName } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A band name's matching key: "The Jelly-Jazz!" and "jelly jazz" are the same band. */
+function bandKey(name) {
+  return String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/^the\s+/, '').replace(/[^a-z0-9]/g, '');
+}
+
+/** Wire a code box: shows which band the code is for as it's typed. */
+function watchCodeBox(input, output, onResult) {
+  let timer = null, last = '';
+  const check = async () => {
+    const code = normaliseCode(input.value);
+    if (code === last) return;
+    last = code;
+    if (code.length < 14) { output.textContent = ''; output.className = 'drive-result'; onResult(null); return; }
+    output.textContent = 'Checking the code…';
+    output.className = 'drive-result';
+    const found = await lookUpCode(code);
+    if (normaliseCode(input.value) !== code) return;           // typed on meanwhile
+    output.textContent = found ? `✓  This code is for: ${found.bandName}` : '✗  That code isn\'t recognised. Check it with whoever sent it.';
+    output.className = 'drive-result ' + (found ? 'ok' : 'bad');
+    onResult(found);
+  };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 350); });
+  input.addEventListener('blur', () => { input.value = normaliseCode(input.value) || input.value; });
+  check();
+}
+
+/** Signed up with a code: record it, join the band, and open the band next time. */
+async function completeSignUp(user, invite) {
+  const db = cloud.db, email = user.email || '';
+  await db.collection('registered').doc(user.uid).set({ email, code: invite.code, bandId: invite.bandId, created: now() });
+  await joinBand(user, invite);
+}
+
+async function joinBand(user, invite) {
+  const db = cloud.db, email = user.email || '';
+  await db.collection('bands').doc(invite.bandId).collection('members').doc(user.uid)
+    .set({ email, name: user.displayName || '', code: invite.code, joined: now() });
+  await db.collection('users').doc(user.uid).collection('bands').doc(invite.bandId).set({ name: invite.bandName, joined: now() });
+  try { localStorage.setItem(accountPrefix(user.uid) + 'space', JSON.stringify(invite.bandId)); } catch { /* no storage */ }
+  try { sessionStorage.setItem('jjs.welcome', invite.bandName); } catch { /* no storage */ }
+}
+
+// ---------------------------------------------------------------- account: sign in, sign up, menu
 function accountName() {
   return cloud.user?.email || cloud.user?.displayName || 'your account';
 }
@@ -611,109 +751,305 @@ function renderAccount() {
   if (!el) return;
   el.hidden = !cloud.enabled;
   $('#helpAccountItem').hidden = $('#helpAccountRule').hidden = !cloud.enabled;   // Help ▸ Your Online Account
+  renderSpacePicker();
   if (!cloud.enabled) return;
+  const badge = cloud.admin && cloud.requests ? ` <span class="badge" title="Invitation requests waiting">${cloud.requests}</span>` : '';
   el.innerHTML = cloud.user
-    ? `<button type="button" id="accountBtn" title="Your account">👤 ${esc(accountName())} ▾</button>`
-    : '<button type="button" id="accountBtn" class="primary" title="Keep your setlists in your own account">Sign in</button>';
+    ? `<button type="button" id="accountBtn" title="Your account">👤 ${esc(accountName())} ▾${badge}</button>`
+    : '<button type="button" id="accountBtn" class="primary" title="Sign in, or sign up with an invitation code">Sign in</button>';
   $('#accountBtn').onclick = () => (cloud.user ? accountMenu() : signIn());
+}
+
+/** The band switcher next to the account button: my own setlists, or a band. */
+function renderSpacePicker() {
+  const sel = $('#spacePicker');
+  if (!sel) return;
+  const show = mode === 'cloud' && cloud.bands.length > 0;
+  sel.hidden = !show;
+  if (!show) return;
+  sel.innerHTML = '<option value="">My own setlists</option>'
+    + cloud.bands.map((b) => `<option value="${esc(b.id)}">🎵 ${esc(b.name)}</option>`).join('');
+  sel.value = cloud.band?.id || '';
+  sel.onchange = async () => {
+    const id = sel.value;
+    if (!await confirmDiscard()) { sel.value = cloud.band?.id || ''; return; }
+    store.set('space', id, accountPrefix());
+    status('Opening…');
+    location.reload();
+  };
 }
 
 function accountMenu() {
   const r = $('#accountBtn').getBoundingClientRect();
   const hasPassword = (cloud.user.providerData || []).some((p) => p.providerId === 'password');
+  const inBand = mode === 'cloud' && cloud.band;
   showContextMenu(r.left, r.bottom + 4, [
-    { label: `Signed in as ${accountName()}`, note: true, plain: true },
-    { label: 'Copy setlists from this computer into my account…', action: () => offerImport(false) },
-    ...(hasPassword ? [{ label: 'Change my password…', action: changePassword }] : []),
+    { label: `Signed in as ${accountName()}${cloud.admin ? '  ·  administrator' : ''}`, note: true, plain: true },
+    ...(cloud.admin ? [
+      { label: 'Bands & invitation codes…', action: adminBands },
+      { label: `Invitation requests${cloud.requests ? ` (${cloud.requests} waiting)` : ''}…`, action: adminRequests },
+      '-',
+    ] : []),
+    { label: 'Join a band with an invitation code…', action: joinWithCode },
+    ...(inBand ? [{ label: `Copy my own setlists into ${cloud.band.name}…`, action: copyMineIntoBand }] : []),
+    { label: `Copy setlists from this computer into ${inBand ? cloud.band.name : 'my account'}…`, action: () => offerImport(false) },
+    ...(inBand && !cloud.admin ? [{ label: `Leave ${cloud.band.name}…`, action: leaveBand }] : []),
     '-',
+    ...(hasPassword ? [{ label: 'Change my password…', action: changePassword }] : []),
     { label: 'Sign out', action: signOut },
     { label: 'Delete my account…', action: deleteAccount },
   ]);
 }
 
-/** The sign-in / create-account window. Loops until signed in or closed. */
-async function signIn(create = false, message = '', email = '') {
-  let tone = 'bad';
+/** The sign-in window: members sign in; new people sign up with an invitation
+    code (which says which band they join), or ask for one. Loops until done. */
+async function signIn(view = 'signin', message = '', email = '', invite = null) {
+  let tone = 'bad', codeText = invite?.code || '';
   for (;;) {
-    const html = `<div class="account-form">
-      <p id="acMsg" class="drive-result ${tone}"${message ? '' : ' hidden'}>${esc(message)}</p>
-      <button type="button" class="google-btn" id="acGoogle"><b>G</b>  Continue with Google</button>
-      <div class="or"><span>or with any email address</span></div>
-      <label for="acEmail">Email address</label>
-      <input id="acEmail" type="email" autocomplete="username" spellcheck="false" value="${esc(email)}">
-      <label for="acPassword">Password</label>
-      <input id="acPassword" type="password" autocomplete="${create ? 'new-password' : 'current-password'}">
-      ${create ? `<label for="acPassword2">Password again</label>
-      <input id="acPassword2" type="password" autocomplete="new-password">
-      <p class="muted small">At least 8 characters. Any email address works - it doesn't have to be Gmail.
-        A message is sent to check the address.</p>`
-      : '<p class="small"><button type="button" class="link-button" id="acForgot">Forgot password?</button></p>'}
-      <p class="muted small">Your settings, song library and setlists are kept in your own account -
-        other people using JJ's Setlist can't see them.</p>
-    </div>`;
+    const msg = `<p id="acMsg" class="drive-result ${tone}"${message ? '' : ' hidden'}>${esc(message)}</p>`;
+    const views = {
+      signin: {
+        title: 'Sign in to JJ\'s Setlist',
+        html: `<div class="account-form">${msg}
+          <h4 class="ac-head">Already a member?</h4>
+          <label for="acEmail">Email address</label>
+          <input id="acEmail" type="email" autocomplete="username" spellcheck="false" value="${esc(email)}">
+          <label for="acPassword">Password</label>
+          <input id="acPassword" type="password" autocomplete="current-password">
+          <p class="small"><button type="button" class="link-button" id="acForgot">Forgot password?</button></p>
+          <button type="button" class="google-btn" id="acGoogle"><b>G</b>  Sign in with Google</button>
+          <div class="or"><span>New here?</span></div>
+          <label for="acCode">Invitation code</label>
+          <div class="drive-row"><input id="acCode" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. JAZZ-7K2Q-M4XP" value="${esc(codeText)}">
+            <button type="button" id="acSignUp" disabled>Sign up with this code</button></div>
+          <div id="acCodeResult" class="drive-result"></div>
+          <p class="small muted">No code? <button type="button" class="link-button" id="acRequest">Request an invitation code</button></p>
+        </div>`,
+        buttons: [{ label: 'Cancel', value: false }, { label: 'Sign In', value: 'go', primary: true, check: () => {
+          const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
+          if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return false; }
+          if (!pw) { showMsg('Please type your password.'); $('#acPassword').focus(); return false; }
+          fields = { email: e, password: pw };
+          return true;
+        } }],
+      },
+      signup: {
+        title: `Join ${invite?.bandName || 'a band'} on JJ's Setlist`,
+        html: `<div class="account-form">${msg}
+          <p class="ac-band">🎵  You're joining <b>${esc(invite?.bandName || '')}</b></p>
+          <button type="button" class="google-btn" id="acGoogle"><b>G</b>  Sign up with Google</button>
+          <div class="or"><span>or with any email address</span></div>
+          <label for="acEmail">Email address</label>
+          <input id="acEmail" type="email" autocomplete="username" spellcheck="false" value="${esc(email)}">
+          <label for="acPassword">Choose a password</label>
+          <input id="acPassword" type="password" autocomplete="new-password">
+          <label for="acPassword2">Password again</label>
+          <input id="acPassword2" type="password" autocomplete="new-password">
+          <p class="muted small">At least 8 characters. Any email address works - it doesn't have to be Gmail.
+            A message is sent to check the address. You'll also have your own private setlists, besides the band's.</p>
+        </div>`,
+        buttons: [{ label: 'Back', value: 'back' }, { label: 'Cancel', value: false },
+          { label: 'Create My Account', value: 'go', primary: true, check: () => {
+            const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
+            if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return false; }
+            if (pw.length < 8) { showMsg('Please choose a password of at least 8 characters.'); $('#acPassword').focus(); return false; }
+            if (pw !== $('#acPassword2').value) { showMsg("The two passwords don't match."); return false; }
+            fields = { email: e, password: pw };
+            return true;
+          } }],
+      },
+      request: {
+        title: 'Request an invitation code',
+        html: `<div class="account-form">${msg}
+          <p>JJ's Setlist is by invitation. Send your details and the administrator will be in touch by email
+            - usually with an invitation code for your band.</p>
+          <label for="rqName">Your name</label>
+          <input id="rqName" type="text" autocomplete="name" maxlength="100">
+          <label for="rqEmail">Your email address</label>
+          <input id="rqEmail" type="email" autocomplete="email" spellcheck="false" maxlength="200" value="${esc(email)}">
+          <label for="rqBand">Band name <span class="muted">(if you're joining a band)</span></label>
+          <input id="rqBand" type="text" maxlength="100">
+          <label for="rqMessage">Message <span class="muted">(optional)</span></label>
+          <textarea id="rqMessage" rows="3" maxlength="1000"></textarea>
+        </div>`,
+        buttons: [{ label: 'Back', value: 'back' }, { label: 'Cancel', value: false },
+          { label: 'Send Request', value: 'go', primary: true, check: () => {
+            const name = $('#rqName').value.trim(), e = $('#rqEmail').value.trim();
+            if (!name) { showMsg('Please type your name.'); $('#rqName').focus(); return false; }
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { showMsg('Please type your email address, so the administrator can reply.'); $('#rqEmail').focus(); return false; }
+            fields = { name, email: e, band: $('#rqBand').value.trim(), message: $('#rqMessage').value.trim() };
+            return true;
+          } }],
+      },
+    };
+    const v = views[view];
     let fields = null;
     const showMsg = (text) => { const m = $('#acMsg'); m.className = 'drive-result bad'; m.textContent = text; m.hidden = false; };
-    const p = dialog(create ? 'Create your JJ\'s Setlist account' : 'Sign in to JJ\'s Setlist', html, [
-      { label: create ? 'I already have an account' : 'Create an account', value: 'switch' },
-      { label: 'Cancel', value: false },
-      { label: create ? 'Create Account' : 'Sign In', value: 'go', primary: true, check: () => {
-        const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
-        if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return false; }
-        if (!pw) { showMsg('Please type your password.'); $('#acPassword').focus(); return false; }
-        if (create && pw.length < 8) { showMsg('Please choose a password of at least 8 characters.'); return false; }
-        if (create && pw !== $('#acPassword2').value) { showMsg("The two passwords don't match."); return false; }
-        fields = { email: e, password: pw };
-        return true;
-      } },
-    ], true);
-    const form = $('#dialogBody');
-    form.querySelectorAll('input').forEach((inp) => inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); [...$('#dialogButtons').children].find((b) => b.classList.contains('primary')).click(); }
+    const p = dialog(v.title, v.html, v.buttons, true);
+    const body = $('#dialogBody');
+    body.querySelectorAll('input').forEach((inp) => inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (inp.id === 'acCode') { if (!$('#acSignUp').disabled) $('#acSignUp').click(); return; }
+      [...$('#dialogButtons').children].find((b) => b.classList.contains('primary')).click();
     }));
-    $('#acGoogle').onclick = () => dialogFinish('google');
-    if (!create) $('#acForgot').onclick = () => { fields = { email: $('#acEmail').value.trim() }; dialogFinish('forgot'); };
-    (email ? $('#acPassword') : $('#acEmail')).focus();
+    $('#acGoogle')?.addEventListener('click', () => dialogFinish('google'));
+    $('#acForgot')?.addEventListener('click', () => { fields = { email: $('#acEmail').value.trim() }; dialogFinish('forgot'); });
+    $('#acRequest')?.addEventListener('click', () => { email = $('#acEmail')?.value.trim() || email; dialogFinish('to-request'); });
+    if (view === 'signin') {
+      let found = null;
+      watchCodeBox($('#acCode'), $('#acCodeResult'), (f) => { found = f; $('#acSignUp').disabled = !f; });
+      $('#acSignUp').addEventListener('click', () => { invite = found; codeText = found.code; dialogFinish('to-signup'); });
+      (email ? $('#acPassword') : $('#acEmail')).focus();
+    } else if (view === 'signup') {
+      $('#acEmail').focus();
+    } else {
+      $('#rqName').focus();
+    }
 
     const ans = await p;
     if (!ans) return;
-    if (ans === 'switch') { create = !create; message = ''; email = $('#acEmail')?.value.trim() || email; continue; }
+    if (ans === 'to-signup') { view = 'signup'; message = ''; continue; }
+    if (ans === 'to-request') { view = 'request'; message = ''; continue; }
+    if (ans === 'back') { view = 'signin'; message = ''; continue; }
     email = fields?.email || email;
     document.body.classList.add('busy');
+    cloud.busy = true;                        // finish the checks before the app reopens
     try {
-      if (ans === 'google') {
-        status('Signing in with Google…');
-        await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
-      } else if (ans === 'forgot') {
+      if (ans === 'forgot') {
         if (!email) { tone = 'bad'; message = 'Type your email address first, then choose “Forgot password?”.'; continue; }
         await cloud.auth.sendPasswordResetEmail(email);
         tone = 'ok';
         message = `If there's an account for ${email}, an email with a link to choose a new password is on its way. `
           + 'Check your spam folder if it doesn\'t arrive.';
         continue;
-      } else if (create) {
+      }
+      if (view === 'request') {
+        await cloud.db.collection('requests').add({ ...fields, created: now() });
+        cloud.busy = false;
+        await messageBox('Request sent', `Thanks, ${fields.name}. Your request has been sent to the administrator, who'll be in touch at ${fields.email}.`);
+        return;
+      }
+      if (view === 'signup') {
+        // The code may have been withdrawn while the window was open.
+        if (!await lookUpCode(invite.code)) { tone = 'bad'; message = 'That invitation code has just been withdrawn. Ask the administrator for a new one.'; view = 'signin'; continue; }
         status('Creating your account…');
-        const { user } = await cloud.auth.createUserWithEmailAndPassword(fields.email, fields.password);
-        await user.sendEmailVerification().catch(() => {});
-      } else {
-        status('Signing in…');
-        await cloud.auth.signInWithEmailAndPassword(fields.email, fields.password);
+        let user;
+        if (ans === 'google') {
+          ({ user } = await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()));
+          if ((await accountStatus(user)).registered) {          // already a member: join the band
+            await joinBand(user, invite);
+            location.reload();
+            return;
+          }
+        } else {
+          ({ user } = await cloud.auth.createUserWithEmailAndPassword(fields.email, fields.password));
+        }
+        try {
+          await completeSignUp(user, invite);
+        } catch (err) {
+          await user.delete().catch(() => {});                  // don't leave a half-made account
+          throw err;
+        }
+        if (ans !== 'google') await user.sendEmailVerification().catch(() => {});
+        status('Account created - opening your band…');
+        location.reload();
+        return;
+      }
+      // Signing in: only for accounts that signed up with a code (or the administrator).
+      status('Signing in…');
+      const result = ans === 'google'
+        ? await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+        : await cloud.auth.signInWithEmailAndPassword(fields.email, fields.password);
+      if (!(await accountStatus(result.user)).registered) {
+        // A Google login made just now, without a code: remove it again.
+        if (result.additionalUserInfo?.isNewUser) await result.user.delete().catch(() => {});
+        await cloud.auth.signOut().catch(() => {});
+        tone = 'bad';
+        message = cloudMessage({ code: 'jjs/not-registered' });
+        continue;
       }
       status('Signed in - opening your account…');
-      return;                                  // the sign-in listener reopens the app in your account
+      location.reload();
+      return;
     } catch (err) {
       tone = 'bad';
       message = cloudMessage(err);
       status(message);
     } finally {
+      cloud.busy = false;
       document.body.classList.remove('busy');
     }
+  }
+}
+
+/** Signed in already: join another band with its code. */
+async function joinWithCode() {
+  let found = null;
+  const p = dialog('Join a band', `<div class="account-form">
+      <p>Type the invitation code the administrator sent you.</p>
+      <label for="jnCode">Invitation code</label>
+      <input id="jnCode" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. JAZZ-7K2Q-M4XP">
+      <div id="jnResult" class="drive-result"></div></div>`,
+  [{ label: 'Cancel', value: false }, { label: 'Join Band', value: true, primary: true, check: () => !!found }], true);
+  watchCodeBox($('#jnCode'), $('#jnResult'), (f) => { found = f; });
+  $('#jnCode').focus();
+  if (!await p || !found) return;
+  if (cloud.bands.some((b) => b.id === found.bandId) && !cloud.admin) {
+    messageBox('Join a band', `You're already in ${found.bandName}. Choose it in the band list at the top right.`);
+    return;
+  }
+  if (!await confirmDiscard()) return;
+  try {
+    await joinBand(cloud.user, found);
+    location.reload();
+  } catch (err) {
+    messageBox('Could not join the band', cloudMessage(err));
+  }
+}
+
+async function leaveBand() {
+  const band = cloud.band;
+  if (!await confirmBox('Leave the band', `Leave ${band.name}?\n\nYou won't see its songs and setlists any more. To come back, you'd need a current invitation code from the administrator.`, 'Leave Band')) return;
+  try {
+    await cloud.db.collection('bands').doc(band.id).collection('members').doc(cloud.user.uid).delete();
+    await cloudUserDoc().collection('bands').doc(band.id).delete();
+    store.clear(store.prefix);
+    store.set('space', '', accountPrefix());
+    location.reload();
+  } catch (err) {
+    messageBox('Could not leave the band', cloudMessage(err));
+  }
+}
+
+/** Copy my personal setlists (and, if the band has none, my song library) into the band. */
+async function copyMineIntoBand() {
+  const band = cloud.band;
+  const mine = await cloudSetlists(cloudUserDoc());
+  const keys = Object.keys(mine).filter((k) => !(k in savedSetlists));
+  const lib = state.library.length ? null : await cloudUserDoc().collection('data').doc('library').get();
+  const takeLibrary = lib?.exists && lib.data().songs?.length;
+  if (!keys.length && !takeLibrary) { messageBox('Copy my setlists', `All your own setlists are in ${band.name} already.`); return; }
+  const what = [keys.length ? `   •  ${plural(keys.length, 'setlist')}` : '', takeLibrary ? `   •  your song library “${lib.data().name}”` : ''].filter(Boolean).join('\n');
+  if (!await confirmBox('Copy my setlists', `Copy these into ${band.name}, for all its members?\n\n${what}\n\nYour own copies stay as they are. ${band.name}'s setlists with the same names aren't changed.`, 'Copy Them')) return;
+  document.body.classList.add('busy');
+  try {
+    for (const k of keys) await putSetlist(k, mine[k]);
+    if (takeLibrary) { useLibraryData(lib.data()); await saveLibrary(lib.data()); }
+    renderAll();
+    renderSaved();
+    status(`Copied ${plural(keys.length, 'setlist')}${takeLibrary ? ' and your song library' : ''} into ${band.name}.`);
+  } catch (err) {
+    messageBox('Could not copy everything', err.message);
+  } finally {
+    document.body.classList.remove('busy');
   }
 }
 
 async function signOut() {
   if (!await confirmDiscard()) return;
   // Clear this account's copies from this browser (it may be a shared computer).
-  store.clear(store.prefix);
+  store.clear(accountPrefix());
   status('Signing out…');
   await cloud.auth.signOut();                  // the sign-in listener reopens the app signed out
 }
@@ -728,28 +1064,234 @@ async function changePassword() {
 }
 
 async function deleteAccount() {
-  const n = Object.keys(savedSetlists).length;
+  const mine = await cloudSetlists(cloudUserDoc()).catch(() => ({}));
+  const bands = cloud.bands.filter((b) => !cloud.admin);
   if (!await dialog('Delete my account',
     `Delete the account ${accountName()} and everything in it?\n\n`
-    + `   •  ${plural(n, 'saved setlist')}\n   •  the song library${state.library.length ? ` (${plural(state.library.length, 'song')})` : ''}\n   •  your settings\n\n`
-    + 'This cannot be undone. Export any setlists you want to keep first (File ▸ Export This Setlist).',
+    + `   •  your own ${plural(Object.keys(mine).length, 'saved setlist')}, song library and settings\n`
+    + (bands.length ? `   •  your membership of ${bands.map((b) => b.name).join(', ')} (the bands' setlists stay, for the other members)\n` : '')
+    + '\nThis cannot be undone. Export any setlists you want to keep first (File ▸ Export This Setlist).',
   [{ label: 'Cancel', value: false }, { label: 'Delete My Account', value: true, primary: true }])) return;
   document.body.classList.add('busy');
   try {
-    const user = cloudUser();
-    const lists = await user.collection('setlists').get();
-    const batch = cloud.db.batch();
-    lists.forEach((doc) => batch.delete(doc.ref));
+    const user = cloudUserDoc(), db = cloud.db, uid = cloud.user.uid;
+    const batch = db.batch();
+    (await user.collection('setlists').get()).forEach((d) => batch.delete(d.ref));
+    (await user.collection('bands').get()).forEach((d) => {
+      batch.delete(d.ref);
+      if (!cloud.admin) batch.delete(db.collection('bands').doc(d.id).collection('members').doc(uid));
+    });
     batch.delete(user.collection('data').doc('settings'));
     batch.delete(user.collection('data').doc('library'));
     await batch.commit();
-    store.clear(store.prefix);
+    await db.collection('registered').doc(uid).delete().catch(() => {});
+    store.clear(accountPrefix());
     await cloud.user.delete();               // the sign-in listener reopens the app signed out
     status('Your account has been deleted.');
   } catch (err) {
     messageBox('Could not delete the account', cloudMessage(err));
   } finally {
     document.body.classList.remove('busy');
+  }
+}
+
+// ---------------------------------------------------------------- administrator: bands, codes, requests
+async function pendingRequests() {
+  try { return (await cloud.db.collection('requests').get()).size; } catch { return 0; }
+}
+
+function inviteText(bandName, code, name = '') {
+  return `Hi${name ? ` ${name}` : ''},\n\nHere's your invitation to join ${bandName} on JJ's Setlist:\n\n`
+    + `    Invitation code:  ${code}\n\n`
+    + `1. Open ${SITE_URL}\n`
+    + '2. Click "Sign in" (top right).\n'
+    + '3. Under "New here?", type the invitation code, then click "Sign up with this code".\n'
+    + '4. Choose your email address and a password (or use Google).\n\n'
+    + `You'll then see ${bandName}'s songs and setlists. The confirmation email may land in your spam folder.\n`;
+}
+
+async function copyText(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    status(`${what} copied - paste it into an email or message.`);
+    return true;
+  } catch {
+    await dialog(what, `<p>Copy this (select it, then Ctrl+C):</p><pre class="copy-box">${esc(text)}</pre>`, undefined, true);
+    return false;
+  }
+}
+
+/** Bands & invitation codes: create bands, make / revoke codes, see and remove members. */
+async function adminBands(message = '') {
+  for (;;) {
+    let bands = [];
+    try {
+      const snap = await cloud.db.collection('bands').get();
+      bands = await Promise.all(snap.docs.map(async (d) => ({
+        id: d.id, ...d.data(), members: (await d.ref.collection('members').get()).size,
+      })));
+    } catch (err) {
+      messageBox('Bands & invitation codes', cloudMessage(err));
+      return;
+    }
+    bands.sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+    const rows = bands.map((b) => `<div class="band-row">
+        <div class="band-name">🎵 ${esc(b.name)} <span class="muted">· ${plural(b.members, 'member')}</span></div>
+        <div class="band-code">${b.inviteCode
+          ? `Invitation code: <code>${esc(b.inviteCode)}</code>
+             <button type="button" data-act="copy" data-band="${esc(b.id)}">Copy invitation</button>
+             <button type="button" data-act="revoke" data-band="${esc(b.id)}">Revoke code</button>`
+          : `<span class="muted">No invitation code - nobody can join.</span>
+             <button type="button" data-act="new" data-band="${esc(b.id)}">Make a code</button>`}
+          <button type="button" data-act="members" data-band="${esc(b.id)}">Members…</button></div>
+      </div>`).join('') || '<p class="muted">No bands yet.</p>';
+    const p = dialog('Bands & invitation codes', `<div class="admin">
+        ${message ? `<p class="drive-result ok">${esc(message)}</p>` : ''}
+        ${rows}
+        <p class="small muted">Send a band's invitation to its members. Everyone can use the same code until you revoke it.
+          Revoking stops new sign-ups; members already in keep their access.</p></div>`,
+    [{ label: 'Create a Band…', value: { act: 'create' } }, { label: 'Close', value: false, primary: true }], true);
+    $('#dialogBody').querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => dialogFinish({ act: btn.dataset.act, id: btn.dataset.band })));
+    const ans = await p;
+    if (!ans) return;
+    const band = bands.find((b) => b.id === ans.id);
+    message = '';
+    try {
+      if (ans.act === 'create') message = await adminCreateBand(bands) || '';
+      else if (ans.act === 'copy') await copyText(inviteText(band.name, band.inviteCode), 'Invitation');
+      else if (ans.act === 'new') message = await setBandCode(band, newInviteCode());
+      else if (ans.act === 'revoke') {
+        if (await confirmBox('Revoke the invitation code', `Revoke ${band.name}'s code ${band.inviteCode}?\n\nNobody new can sign up with it any more. Members already in keep their access. You can make a new code at any time.`, 'Revoke Code')) {
+          message = await setBandCode(band, null);
+        }
+      } else if (ans.act === 'members') await adminMembers(band);
+    } catch (err) {
+      message = '';
+      await messageBox('Bands & invitation codes', cloudMessage(err));
+    }
+  }
+}
+
+/** Give a band a new code (or none): the old code stops working at once. */
+async function setBandCode(band, code) {
+  const db = cloud.db, batch = db.batch();
+  if (band.inviteCode) batch.delete(db.collection('invites').doc(band.inviteCode));
+  if (code) batch.set(db.collection('invites').doc(code), { bandId: band.id, bandName: band.name, created: now() });
+  batch.update(db.collection('bands').doc(band.id), { inviteCode: code });
+  await batch.commit();
+  return code ? `${band.name}'s new invitation code is ${code}.` : `${band.name}'s invitation code has been revoked.`;
+}
+
+async function adminCreateBand(bands) {
+  let name = '', note = '';
+  for (;;) {
+    const p = dialog('Create a band', `<div class="account-form">
+        ${note ? `<p class="drive-result bad">${esc(note)}</p>` : ''}
+        <label for="bnName">Band name</label>
+        <input id="bnName" type="text" maxlength="60" value="${esc(name)}" placeholder="e.g. Jelly Jazz">
+        <p class="small muted">An invitation code is made for it straight away, to send to the band's members.</p></div>`,
+    [{ label: 'Cancel', value: false }, { label: 'Create Band', value: true, primary: true, check: () => !!$('#bnName').value.trim() }], true);
+    $('#bnName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...$('#dialogButtons').children].pop().click(); } });
+    $('#bnName').focus();
+    if (!await p) return null;
+    name = $('#bnName').value.trim().replace(/\s+/g, ' ');
+    const key = bandKey(name);
+    if (!key) { note = 'Please use some letters or numbers in the name.'; continue; }
+    const same = bands.find((b) => (b.key || bandKey(b.name)) === key);
+    if (same) { note = `There's already a band called “${same.name}” - that's the same name, apart from spaces, capitals or punctuation.`; continue; }
+    const close = bands.find((b) => spellingSimilarity(key, b.key || bandKey(b.name)) >= 0.8);
+    if (close && !await confirmBox('Create a band', `“${name}” looks very like the band “${close.name}”.\n\nCreate “${name}” as a separate band anyway?`, 'Create It')) { note = ''; continue; }
+    const code = newInviteCode(), db = cloud.db, batch = db.batch();
+    batch.set(db.collection('bands').doc(key), { name, key, inviteCode: code, created: now(), createdBy: cloud.user.uid });
+    batch.set(db.collection('invites').doc(code), { bandId: key, bandName: name, created: now() });
+    batch.set(cloudUserDoc().collection('bands').doc(key), { name, joined: now() });
+    await batch.commit();
+    cloud.bands.push({ id: key, name });
+    cloud.bands.sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+    renderSpacePicker();
+    return `Created ${name}. Its invitation code is ${code} - use “Copy invitation” to send it to the members.`;
+  }
+}
+
+async function adminMembers(band) {
+  for (;;) {
+    const snap = await cloud.db.collection('bands').doc(band.id).collection('members').get();
+    const members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }))
+      .sort((a, b) => fold(a.email).localeCompare(fold(b.email)));
+    const joined = (m) => (m.joined?.toDate ? dateTimeText(m.joined.toDate().toISOString()) : '');
+    const p = dialog(`${band.name} - members`, `<div class="admin">${members.map((m) => `<div class="band-row member-row">
+        <div>${esc(m.email || m.name || m.uid)} <span class="muted small">· joined ${esc(joined(m))}</span></div>
+        <button type="button" data-uid="${esc(m.uid)}">Remove</button></div>`).join('') || '<p class="muted">No members yet.</p>'}</div>`,
+    [{ label: 'Close', value: false, primary: true }], true);
+    $('#dialogBody').querySelectorAll('[data-uid]').forEach((btn) => btn.addEventListener('click', () => dialogFinish(btn.dataset.uid)));
+    const uid = await p;
+    if (!uid) return;
+    const m = members.find((x) => x.uid === uid);
+    if (await confirmBox('Remove member', `Remove ${m.email || 'this member'} from ${band.name}?\n\nThey won't see the band's songs and setlists any more. Their own account and setlists stay.`, 'Remove')) {
+      await cloud.db.collection('bands').doc(band.id).collection('members').doc(uid).delete();
+    }
+  }
+}
+
+/** Invitation requests: reply by email with a band's code, or delete. */
+async function adminRequests() {
+  for (;;) {
+    let requests = [], bands = [];
+    try {
+      const [rq, bd] = await Promise.all([cloud.db.collection('requests').get(), cloud.db.collection('bands').get()]);
+      requests = rq.docs.map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.created?.seconds || 0) - (a.created?.seconds || 0));
+      bands = bd.docs.map((d) => ({ id: d.id, ...d.data() })).filter((b) => b.inviteCode)
+        .sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+    } catch (err) {
+      messageBox('Invitation requests', cloudMessage(err));
+      return;
+    }
+    cloud.requests = requests.length;
+    renderAccount();
+    const when = (r) => (r.created?.toDate ? dateTimeText(r.created.toDate().toISOString()) : '');
+    const options = bands.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+    const rows = requests.map((r) => `<div class="band-row request-row">
+        <div><b>${esc(r.name)}</b> &lt;${esc(r.email)}&gt; <span class="muted small">· ${esc(when(r))}</span></div>
+        ${r.band ? `<div class="small">Band: ${esc(r.band)}</div>` : ''}
+        ${r.message ? `<div class="small request-msg">${esc(r.message)}</div>` : ''}
+        <div class="band-code">${bands.length ? `<select data-for="${esc(r.id)}">${options}</select>
+          <button type="button" data-act="email" data-id="${esc(r.id)}">Email them the code…</button>`
+          : '<span class="muted small">Make a band code first (Bands & invitation codes).</span>'}
+          <button type="button" data-act="delete" data-id="${esc(r.id)}">Delete request</button></div>
+      </div>`).join('') || '<p class="muted">No requests waiting.</p>';
+    const p = dialog('Invitation requests', `<div class="admin">${rows}
+        <p class="small muted">“Email them the code” opens an email to them in your email program, with the band's invitation code and steps filled in. Check who they are before sending.</p></div>`,
+    [{ label: 'Close', value: false, primary: true }], true);
+    // Suggest the band they asked for.
+    requests.forEach((r) => {
+      const sel = $('#dialogBody').querySelector(`select[data-for="${CSS.escape(r.id)}"]`);
+      const match = sel && bands.find((b) => bandKey(b.name) === bandKey(r.band));
+      if (match) sel.value = match.id;
+    });
+    $('#dialogBody').querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => dialogFinish({
+      act: btn.dataset.act, id: btn.dataset.id,
+      band: $('#dialogBody').querySelector(`select[data-for="${CSS.escape(btn.dataset.id)}"]`)?.value,
+    })));
+    const ans = await p;
+    if (!ans) return;
+    const r = requests.find((x) => x.id === ans.id);
+    try {
+      if (ans.act === 'email') {
+        const band = bands.find((b) => b.id === ans.band);
+        const subject = `Your invitation to ${band.name} on JJ's Setlist`;
+        window.location.href = `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteText(band.name, band.inviteCode, r.name))}`;
+        if (await confirmBox('Invitation requests', `An email to ${r.email} should now be open in your email program.\n\nOnce it's sent, delete this request?`, 'Delete Request')) {
+          await cloud.db.collection('requests').doc(r.id).delete();
+        }
+      } else if (ans.act === 'delete') {
+        if (await confirmBox('Delete request', `Delete the request from ${r.name} <${r.email}>?`, 'Delete')) {
+          await cloud.db.collection('requests').doc(r.id).delete();
+        }
+      }
+    } catch (err) {
+      await messageBox('Invitation requests', cloudMessage(err));
+    }
   }
 }
 
@@ -773,13 +1315,14 @@ async function localDataForImport() {
   return { lists, settings, library: library?.songs?.length ? library : null, from };
 }
 
-/** Copy setlists (and, for a new account, the song library and settings) into the account. */
+/** Copy setlists (and, for a new account, the song library and settings) into the open space. */
 async function offerImport(newAccount) {
   const { lists, settings, library, from } = await localDataForImport();
+  const into = cloud.band ? cloud.band.name : 'your account';
   const keys = Object.keys(lists).filter((k) => !(k in savedSetlists));
   const bring = [];
   if (keys.length) bring.push(`${plural(keys.length, 'saved setlist')} (from ${from})`);
-  const takeLibrary = newAccount && library && !state.library.length;
+  const takeLibrary = library && !state.library.length;
   if (takeLibrary) bring.push(`the song library “${library.name}” (${plural(library.songs.length, 'song')})`);
   const takeSettings = newAccount && settings;
   if (takeSettings) bring.push('your colours, text size and Google Drive link');
@@ -788,13 +1331,13 @@ async function offerImport(newAccount) {
       saveSettings();                          // marks the account as set up
       messageBox('Welcome to JJ\'s Setlist', `Your account is ready: ${accountName()}.\n\nOpen your song spreadsheet (File ▸ Open Song Database), or add its Google Drive link in File ▸ Song Database Settings. Setlists you save are kept in your account.`);
     } else {
-      messageBox('Copy setlists', `There are no setlists on this computer that aren't in your account already.`);
+      messageBox('Copy setlists', `There are no setlists on this computer that aren't in ${into} already.`);
     }
     return;
   }
-  const ok = await dialog(newAccount ? 'Welcome to JJ\'s Setlist' : 'Copy setlists into my account',
-    `${newAccount ? `Your account is ready: ${accountName()}.\n\n` : ''}Copy these into your account?\n\n${bring.map((b) => `   •  ${b}`).join('\n')}\n\n`
-    + 'They stay on this computer too. Setlists already in your account aren\'t changed.',
+  const ok = await dialog(newAccount ? 'Welcome to JJ\'s Setlist' : `Copy setlists into ${into}`,
+    `${newAccount ? `Your account is ready: ${accountName()}.\n\n` : ''}Copy these into ${into}?\n\n${bring.map((b) => `   •  ${b}`).join('\n')}\n\n`
+    + `They stay on this computer too. Setlists already in ${into} aren't changed.`,
   [{ label: 'Not Now', value: false }, { label: 'Copy Them', value: true, primary: true }]);
   if (!ok) { if (newAccount) saveSettings(); return; }
   document.body.classList.add('busy');
@@ -810,7 +1353,7 @@ async function offerImport(newAccount) {
     applyLook();
     renderAll();
     renderSaved();
-    status(`Copied ${plural(copied, 'setlist')}${takeLibrary ? ' and the song library' : ''} into your account.`);
+    status(`Copied ${plural(copied, 'setlist')}${takeLibrary ? ' and the song library' : ''} into ${into}.`);
   } catch (err) {
     messageBox('Could not copy everything', `${plural(copied, 'setlist')} copied, then:\n\n${err.message}`);
   } finally {
@@ -1574,8 +2117,8 @@ async function save() {
   renderTotals();
   status({
     cloud: cloudQueued
-      ? `Saved setlist “${state.name}” in this browser - it will be uploaded to your account when the connection is back.`
-      : `Saved setlist “${state.name}” in your account.`,
+      ? `Saved setlist “${state.name}” in this browser - it will be uploaded to ${spaceName()} when the connection is back.`
+      : `Saved setlist “${state.name}” in ${spaceName()}.`,
     files: `Saved setlist “${state.name}”  →  setlists\\${key}.json`,
     browser: `Saved setlist “${state.name}” in this browser.  (File ▸ Export makes a copy for the desktop app or another computer.)`,
   }[mode]);
@@ -1904,7 +2447,7 @@ const GUIDES = {
       ['b', 'File ▸ Print / Save as PDF: Song List prints the whole library, or just the songs matching a search.'],
       ['h2', 'Where your setlists are kept'],
       ['p', 'The label next to the song total says which is in use:'],
-      ['b', '☁ Saving to your account - signed in: your setlists, songs and colours are in your account, on any computer. See Help ▸ Your Online Account.'],
+      ['b', '☁ Saving to your account (or ☁ Saving to your band) - signed in: your setlists and songs are online, on any computer; a band\'s are shared by its members. Switch between your own setlists and your band at the top right. See Help ▸ Your Online Account & Bands.'],
       ['b', `💾 Saving to files in the project folder - started with “${LAUNCHER}”: settings in config.json and setlists in the setlists folder, the same files as the desktop app.`],
       ['b', 'Saving in this browser only - neither of those. Use Export to keep copies of setlists you care about.'],
       ['tip', 'Tip: the app remembers the setlist on screen, even unsaved, so closing the tab or reloading the page loses nothing.'],
@@ -2014,26 +2557,38 @@ const GUIDES = {
   },
 
   account: {
-    title: 'Your Online Account',
+    title: 'Your Online Account & Bands',
     content: () => [
-      ['p', 'Sign in and your song library, settings and setlists are kept in your own account - so they\'re there on any computer, online or with the launcher. Nobody else using JJ\'s Setlist can see them.'],
-      ['h2', 'Creating an account'],
-      ['n', '1.  Click Sign in (top right) ▸ Create an account.'],
-      ['n', '2.  Type your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters.'],
-      ['n', '3.  Click Create Account. A message is sent to check the address: open it and click its link (look in the spam folder if it doesn\'t arrive).'],
-      ['b', 'Or click Continue with Google to use a Google account instead of a password.'],
-      ['b', 'A new account offers to copy in the setlists, song library and colours already on that computer.'],
+      ['p', 'Sign in and your song library, settings and setlists are kept online - there on any computer. If you\'re in a band, you also share the band\'s song library and setlists with its other members.'],
+      ['h2', 'Joining (signing up)'],
+      ['p', 'JJ\'s Setlist is by invitation: you need an invitation code from the administrator. The code also says which band you\'re joining.'],
+      ['n', '1.  Click Sign in (top right). Under “New here?”, type the invitation code - it shows which band it\'s for.'],
+      ['n', '2.  Click Sign up with this code.'],
+      ['n', '3.  Type your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters. Or click Sign up with Google.'],
+      ['n', '4.  Click Create My Account. A message is sent to check your address: open it and click its link (look in the spam folder if it doesn\'t arrive).'],
+      ['b', 'No code yet? Click Request an invitation code on the Sign in window, and send your name and email address. The administrator will be in touch.'],
+      ['h2', 'Your band, and your own setlists'],
+      ['b', 'In a band, its members share one song library and one set of saved setlists. Everyone has full access: anything a member saves, the others see.'],
+      ['b', 'You also have your own private setlists. Switch between them and your band(s) with the list at the top right, next to your email address.'],
+      ['b', 'The label next to the song total shows which is open, e.g. ☁ Saving to Jelly Jazz, or ☁ Saving to your account.'],
+      ['b', 'Colours and text size are always your own; a band\'s Google Drive link (File ▸ Song Database Settings) is shared by its members.'],
+      ['b', 'Already signed up, and given a code for another band? Use Join a band with an invitation code in your account menu.'],
       ['h2', 'Your account menu'],
       ['p', 'Click your email address (top right):'],
-      ['b', 'Copy setlists from this computer into my account - brings in setlists saved before you signed in, or in the setlists folder.'],
+      ['b', 'Copy my own setlists into the band - shares setlists you made yourself with the band (yours stay as they are).'],
+      ['b', 'Copy setlists from this computer - brings in setlists saved before you signed in, or in the setlists folder.'],
+      ['b', 'Leave the band - you stop seeing its songs and setlists.'],
       ['b', 'Change my password - sends you an email with a link to choose a new one.'],
-      ['b', 'Sign out - also clears your copy from this browser, so it\'s safe on a shared computer.'],
-      ['b', 'Delete my account - removes the account and everything in it, for good. Export any setlists you want to keep first.'],
+      ['b', 'Sign out - also clears your copies from this browser, so it\'s safe on a shared computer.'],
+      ['b', 'Delete my account - removes your account and your own setlists for good (a band\'s setlists stay, for its other members). Export any you want to keep first.'],
+      ['h2', 'For the administrator'],
+      ['b', 'Bands & invitation codes: create a band (similar or duplicate names are caught), copy its invitation to send to the members, revoke the code once everyone has joined, make a new one, and see or remove members.'],
+      ['b', 'Everyone in a band can use the same code until it\'s revoked. Revoking stops new sign-ups; members already in keep their access.'],
+      ['b', 'Invitation requests: see who asked for a code (a number on your account button shows how many are waiting), email them the band\'s invitation, or delete the request.'],
       ['h2', 'Forgotten your password?'],
       ['p', 'On the Sign in window, type your email address and click Forgot password? - an email with a link to choose a new password is sent to you.'],
       ['h2', 'No internet?'],
-      ['p', 'Changes are kept in this browser and uploaded to your account when the connection is back - the status bar says so.'],
-      ['tip', 'Signed in, the label next to the song total shows ☁ Saving to your account.'],
+      ['p', 'Changes are kept in this browser and uploaded when the connection is back - the status bar says so.'],
     ],
   },
 };
@@ -2418,7 +2973,13 @@ async function start() {
       console.error(err);
       store.prefix = BASE_PREFIX;
       loadLocalState();
-      messageBox('Could not open your account', `Your account's data couldn't be loaded:\n\n${cloudMessage(err)}\n\nFor now, changes are kept in this browser only. Reload the page to try again.`);
+      if (err.code === 'jjs/not-registered') {
+        // A login that didn't come with an invitation code: it can't use the app.
+        messageBox('Sign-up needs an invitation code', `${cloudMessage(err)}\n\nYou've been signed out. If you have a code, choose Sign in ▸ “New here?”.`)
+          .then(() => cloud.auth.signOut());
+      } else {
+        messageBox('Could not open your account', `Your account's data couldn't be loaded:\n\n${cloudMessage(err)}\n\nFor now, changes are kept in this browser only. Reload the page to try again.`);
+      }
     }
   } else if (files.on) {
     try {
@@ -2442,8 +3003,16 @@ async function start() {
   } else {
     status('Open your song spreadsheet to begin: File ▸ Open Song Database…');
   }
-  // A brand-new account: offer to bring in what's on this computer.
-  if (newAccount) offerImport(true);
+  // Just joined a band: say hello. A brand-new personal space: offer to bring in what's on this computer.
+  let welcome = null;
+  try { welcome = sessionStorage.getItem('jjs.welcome'); sessionStorage.removeItem('jjs.welcome'); } catch { /* no storage */ }
+  if (cloud.notice) await messageBox(...cloud.notice);   // e.g. removed from a band - say so first
+  if (welcome && mode === 'cloud') {
+    messageBox(`Welcome to ${welcome}`, `You're now a member of ${welcome}, with full access to its song library and setlists.\n\n`
+      + 'Switch between the band and your own setlists with the list at the top right, next to your email address.');
+  } else if (newAccount) {
+    offerImport(true);
+  }
   // Google Drive copy: each time the app opens when it's the first choice,
   // or as the backup when no song database is loaded here.
   if (state.driveUrl && (state.driveFirst || !state.library.length)) {
