@@ -610,6 +610,7 @@ function renderAccount() {
   const el = $('#account');
   if (!el) return;
   el.hidden = !cloud.enabled;
+  $('#helpAccountItem').hidden = $('#helpAccountRule').hidden = !cloud.enabled;   // Help ▸ Your Online Account
   if (!cloud.enabled) return;
   el.innerHTML = cloud.user
     ? `<button type="button" id="accountBtn" title="Your account">👤 ${esc(accountName())} ▾</button>`
@@ -1874,21 +1875,205 @@ function setFont(size) {
   status(`Text size ${state.fontSize}.`);
 }
 
-const HELP_BASICS = `1.  File ▸ Open Song Database… and choose your song spreadsheet (.xlsx or .csv). It's remembered in this browser, so next time the library is already there.
+// ---------------------------------------------------------------- help guides
+// Each guide is a list of [kind, text]: h2 / h3 headings, p (paragraph),
+// b (bullet), n (numbered step), code, tip, warn. Ctrl+ becomes Cmd+ on a Mac.
+const GUIDES = {
+  basics: {
+    title: 'How to Use - The Basics',
+    content: () => [
+      ['h2', 'Building sets'],
+      ['b', 'Click a set to make it the current one (coloured frame and blue title).'],
+      ['b', 'Double-click a library song (or select it and press Enter) to add it to the current set. Or drag songs from the library into any set, at any position.'],
+      ['b', 'Drag within a set to reorder, or to another set to move a song. Drag a song back to the library to remove it.'],
+      ['b', 'Alt+↑ / Alt+↓ (or the ▲ Up / ▼ Down buttons) move the selected song; Delete removes it.'],
+      ['b', 'Alt+1 … Alt+4 jump to a set, Alt+L to the library, Ctrl+F to the Search box.'],
+      ['b', 'Songs already in the setlist are greyed out in the library. Each set shows roughly how long it runs (about 3½ minutes a song).'],
+      ['h2', 'Right-click a song'],
+      ['p', 'Right-click a song (or press Shift+F10) for its menu: Open Songsheet, Move Up / Down, Replace with…, Remove - or, in the library, Add to Set 1–4.'],
+      ['b', 'A song marked ⚠ in orange is no longer in the song database (e.g. it was renamed). Right-click it and choose Replace with… - the closest matches are listed first - or Remove.'],
+      ['h2', 'Songsheets'],
+      ['b', 'Songs with a songsheet link show 📄. Click the 📄, or double-click a song in a set, to open its songsheet.'],
+      ['b', 'Links are added in your spreadsheet - see Help ▸ Setting Up Your Spreadsheet.'],
+      ['h2', 'Saving and loading setlists'],
+      ['b', 'Type a name (include the venue and date, e.g. “The Local Pub - October 2026”) and press Save Setlist (Ctrl+S, or Enter in the name box).'],
+      ['b', 'Load a saved setlist from the Saved setlists list. New starts an empty one.'],
+      ['b', 'File ▸ Export This Setlist (.json) makes a copy you can e-mail, or open in the desktop app. File ▸ Import Saved Setlists brings copies in (or drag .json files onto the window).'],
+      ['h2', 'Printing'],
+      ['b', 'File ▸ Print / Save as PDF (Ctrl+P): landscape, aligned columns, a set is never split across pages. Choose the printer - or “Save as PDF” to e-mail it - in the print window.'],
+      ['b', 'File ▸ Print / Save as PDF: Song List prints the whole library, or just the songs matching a search.'],
+      ['h2', 'Where your setlists are kept'],
+      ['p', 'The label next to the song total says which is in use:'],
+      ['b', '☁ Saving to your account - signed in: your setlists, songs and colours are in your account, on any computer. See Help ▸ Your Online Account.'],
+      ['b', `💾 Saving to files in the project folder - started with “${LAUNCHER}”: settings in config.json and setlists in the setlists folder, the same files as the desktop app.`],
+      ['b', 'Saving in this browser only - neither of those. Use Export to keep copies of setlists you care about.'],
+      ['tip', 'Tip: the app remembers the setlist on screen, even unsaved, so closing the tab or reloading the page loses nothing.'],
+    ],
+  },
 
-2.  Click a set to make it current (coloured frame and blue title), then double-click library songs to add them - or drag them in.
+  spreadsheet: {
+    title: 'Setting Up Your Song Spreadsheet',
+    actions: [['Create Template Spreadsheet', 'xlsx']],
+    content: () => [
+      ['p', 'The song library comes from a spreadsheet: an Excel workbook (.xlsx) - or a CSV file, see Help ▸ Using a CSV File Instead. Each row is one song, and each song name can carry a link to its songsheet (PDF).'],
+      ['tip', 'Quickest start: click “Create Template Spreadsheet” below, fill it in, then open it with File ▸ Open Song Database.'],
+      ['h2', '1.  The column headings (row 1)'],
+      ['p', 'Put these headings in the first row of the first worksheet. Capitals don\'t matter and the columns can be in any order.'],
+      ['code', 'SONG NAME      Artist      Style      Vocalist'],
+      ['b', 'SONG NAME - required. The title as you want it shown.'],
+      ['b', 'Artist - optional. Original artist or band.'],
+      ['b', 'Style - optional. e.g. Ballad, 60\'s  ·  Rock  ·  Latin'],
+      ['b', 'Vocalist - optional. Who sings it.'],
+      ['p', 'Other accepted heading names:'],
+      ['b', 'SONG NAME:  Title, Song, Song Title, Name, Track'],
+      ['b', 'Artist:  Band, Performer, Original Artist'],
+      ['b', 'Style:  Genre, Type'],
+      ['b', 'Vocalist:  Singer, Vocals, Vocal, Lead Vocal'],
+      ['p', 'Any other columns (notes, keys, etc.) are simply ignored, so you can keep extra information in the sheet.'],
+      ['h2', '2.  One song per row'],
+      ['b', 'Start on row 2, one song per row. Empty rows are skipped.'],
+      ['b', 'If you have two versions of a song, make the names different, e.g. “Scarborough Fair [v1]” and “Scarborough Fair [v2]”.'],
+      ['b', 'Style and Vocalist are searchable - type “Ballad” or a singer\'s name in the Search box.'],
+      ['h2', '3.  Adding songsheet links'],
+      ['p', 'Attach the link to the SONG NAME cell. Songs with a link show 📄 in the app.'],
+      ['h3', 'Method A - Insert Link (recommended)'],
+      ['n', '1.  Click the song-name cell.'],
+      ['n', '2.  Press Ctrl+K  (or Insert ▸ Link).'],
+      ['n', '3.  In “Address”, paste the web address of the songsheet.'],
+      ['n', '4.  Click OK. The name turns blue and underlined.'],
+      ['h3', 'Method B - HYPERLINK formula'],
+      ['code', '=HYPERLINK("https://drive.google.com/file/d/…/view", "El Paso")'],
+      ['p', 'The first part is the link, the second is the song name shown.'],
+      ['h3', 'Method C - a separate link column'],
+      ['p', 'Add a column headed Songsheet (or Link, URL, PDF) and type the web address in it. This also works in CSV files.'],
+      ['h2', '4.  Getting a Google Drive link for a PDF'],
+      ['n', '1.  In Google Drive, right-click the PDF ▸ Share ▸ Copy link.'],
+      ['n', '2.  If bandmates will use the songsheets too, set General access to “Anyone with the link”.'],
+      ['n', '3.  Paste the link into the spreadsheet with Ctrl+K, as in Method A.'],
+      ['warn', 'Web links (e.g. Google Drive) work everywhere. Links to PDF files on your computer only open when JJ\'s Setlist is started with its launcher, and the PDFs are inside its folder (e.g. a Songsheets folder in it) - use a link like Songsheets\\El Paso.pdf. They don\'t work in the online version.'],
+      ['h2', '5.  Editing a linked cell (in Excel)'],
+      ['b', 'Clicking a linked cell opens the link. To edit the name instead, select the cell with the arrow keys (or click and hold) and press F2.'],
+      ['b', 'Editing the text keeps the link. To change the link, press Ctrl+K.'],
+      ['h2', '6.  Saving - important!'],
+      ['warn', 'Always save as an Excel Workbook (.xlsx): saving as CSV throws away every link behind a song name.'],
+      ['b', 'Use Ctrl+S. If Excel asks about the format, choose Excel Workbook.'],
+      ['b', 'Only the first worksheet is read. Formatting (fonts, colours, column widths) doesn\'t matter.'],
+      ['h2', '7.  Loading it into JJ\'s Setlist'],
+      ['b', 'File ▸ Open Song Database… (Ctrl+O) and choose the .xlsx. The songs are remembered (in your account when signed in), so next time the library is already there.'],
+      ['b', 'After editing the spreadsheet, open it again the same way - a browser can\'t re-read a file on its own. (A Google Drive copy, below, is re-read automatically.)'],
+      ['b', 'The top bar shows how many songs and songsheets were found - if the songsheet count is 0, the file was probably saved as CSV.'],
+      ['tip', 'You can also drag the spreadsheet file straight onto the JJ\'s Setlist window.'],
+      ['h2', '8.  Keeping it on Google Drive'],
+      ['p', 'Keep the spreadsheet on Google Drive and JJ\'s Setlist can load the latest version each time it opens - on any computer, and for bandmates too.'],
+      ['n', '1.  Upload the .xlsx to Google Drive (or make it in Google Sheets) and share it as “Anyone with the link”.'],
+      ['n', '2.  Right-click it in Drive ▸ Share ▸ Copy link.'],
+      ['n', '3.  In JJ\'s Setlist: File ▸ Song Database Settings, paste the link, click Test link, choose “The Google Drive copy first”, then Save.'],
+      ['b', 'If Google Drive can\'t be reached (e.g. no internet), the copy kept from last time is used, and the top bar shows ⚠ BACKUP in orange.'],
+      ['warn', 'To update a Drive copy, use Manage versions ▸ Upload new version in Google Drive. Deleting it and uploading a new file gives it a new link.'],
+      ['warn', 'Loading from Google Drive needs JJ\'s Setlist opened from a web address - online, or started with its launcher - not by double-clicking index.html.'],
+    ],
+  },
 
-3.  Reorder with drag and drop, Alt+↑ / Alt+↓, or the ▲ Up / ▼ Down buttons. Drag a song back to the library to remove it.
+  csv: {
+    title: 'Using a CSV File Instead',
+    actions: [['Create Template CSV', 'csv']],
+    content: () => [
+      ['p', 'The song library doesn\'t have to be an Excel workbook. A CSV file (comma-separated values) works too - handy if you keep your list in Google Sheets, Numbers, LibreOffice or a plain text editor.'],
+      ['warn', 'A CSV can\'t hold links hidden behind a song name: Excel drops them all when it saves as CSV. Put the links in their own column instead (see step 3).'],
+      ['tip', 'Quickest start: click “Create Template CSV” below - it already has the right headings and a link column.'],
+      ['tip', 'Already have an Excel sheet with links behind the names? Open it, then use File ▸ Export Song Database as CSV (with web links): every link is written into a Songsheet column, so none are lost.'],
+      ['h2', '1.  The column headings (first line)'],
+      ['p', 'The same headings as the Excel version - any order, capitals don\'t matter, and extra columns are ignored:'],
+      ['code', 'SONG NAME,Artist,Style,Vocalist,Songsheet'],
+      ['b', 'SONG NAME - required. Also accepted: Title, Song, Name, Track'],
+      ['b', 'Artist, Style, Vocalist - optional (same alternatives as Excel).'],
+      ['b', 'Songsheet - optional link column. Also accepted: Link, URL, PDF, Sheet, Chart'],
+      ['h2', '2.  One song per line'],
+      ['code', 'El Paso,Marty Robbins,Country,Adrian,https://drive.google.com/…\nBlue Moon,Nat King Cole,Ballad,Gary,Songsheets\\Blue Moon.pdf\nMoon River,Henry Mancini,Ballad,,'],
+      ['b', 'Leave a value empty by putting nothing between the commas (Moon River has no vocalist or songsheet above).'],
+      ['b', 'If a value contains a comma, wrap it in double quotes, e.g. "Ballad, 60\'s". Spreadsheet programs do this for you.'],
+      ['b', 'Extra commas at the end of lines are fine - they\'re ignored.'],
+      ['h2', '3.  Songsheet links in a CSV'],
+      ['p', 'Type (or paste) the full link into the Songsheet column:'],
+      ['b', 'A web address, e.g. a Google Drive link (Drive: right-click the PDF ▸ Share ▸ Copy link). These work everywhere.'],
+      ['b', 'Or a file inside JJ\'s Setlist\'s folder, e.g.  Songsheets\\El Paso.pdf  - this only opens when JJ\'s Setlist is started with its launcher, not online.'],
+      ['p', 'Songs with a link show 📄 in the app, exactly as with Excel.'],
+      ['h2', '4.  Saving a CSV'],
+      ['b', 'Excel: File ▸ Save As ▸ “CSV UTF-8 (Comma delimited) (*.csv)”. UTF-8 keeps accented names (Hasta Mañana) correct.'],
+      ['b', 'Google Sheets: File ▸ Download ▸ Comma-separated values (.csv).'],
+      ['b', 'Text editor: save with a .csv extension (UTF-8 if offered).'],
+      ['h2', '5.  Loading it into JJ\'s Setlist'],
+      ['b', 'File ▸ Open Song Database… (Ctrl+O) and choose the .csv - or drag it onto the window.'],
+      ['b', 'After editing, open it again the same way.'],
+      ['b', 'Check the top bar: it shows how many songs and songsheets were found.'],
+      ['h2', 'Excel or CSV?'],
+      ['b', 'Excel (.xlsx): links can hide behind the song name, and your formatting is kept.'],
+      ['b', 'CSV: simple plain text that any program can edit, but links must go in their own column and there\'s no formatting.'],
+      ['p', 'Both work fully in JJ\'s Setlist - choose whichever suits the way you keep your song list.'],
+    ],
+  },
 
-4.  Type a name (include venue and date) and Save Setlist.
+  account: {
+    title: 'Your Online Account',
+    content: () => [
+      ['p', 'Sign in and your song library, settings and setlists are kept in your own account - so they\'re there on any computer, online or with the launcher. Nobody else using JJ\'s Setlist can see them.'],
+      ['h2', 'Creating an account'],
+      ['n', '1.  Click Sign in (top right) ▸ Create an account.'],
+      ['n', '2.  Type your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters.'],
+      ['n', '3.  Click Create Account. A message is sent to check the address: open it and click its link (look in the spam folder if it doesn\'t arrive).'],
+      ['b', 'Or click Continue with Google to use a Google account instead of a password.'],
+      ['b', 'A new account offers to copy in the setlists, song library and colours already on that computer.'],
+      ['h2', 'Your account menu'],
+      ['p', 'Click your email address (top right):'],
+      ['b', 'Copy setlists from this computer into my account - brings in setlists saved before you signed in, or in the setlists folder.'],
+      ['b', 'Change my password - sends you an email with a link to choose a new one.'],
+      ['b', 'Sign out - also clears your copy from this browser, so it\'s safe on a shared computer.'],
+      ['b', 'Delete my account - removes the account and everything in it, for good. Export any setlists you want to keep first.'],
+      ['h2', 'Forgotten your password?'],
+      ['p', 'On the Sign in window, type your email address and click Forgot password? - an email with a link to choose a new password is sent to you.'],
+      ['h2', 'No internet?'],
+      ['p', 'Changes are kept in this browser and uploaded to your account when the connection is back - the status bar says so.'],
+      ['tip', 'Signed in, the label next to the song total shows ☁ Saving to your account.'],
+    ],
+  },
+};
 
-5.  File ▸ Print / Save as PDF. Choose your printer, or "Save as PDF", in the print window.
+/** A guide as HTML: consecutive bullets / steps are grouped into lists. */
+function guideHtml(content) {
+  let html = '', list = null;
+  const close = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const [kind, raw] of content) {
+    const text = esc(forPlatform(raw));
+    if (kind === 'b' || kind === 'n') {
+      const want = kind === 'b' ? 'ul' : 'ol';
+      if (list !== want) { close(); html += `<${want}>`; list = want; }
+      html += `<li>${kind === 'n' ? text.replace(/^\d+\.\s+/, '') : text}</li>`;
+      continue;
+    }
+    close();
+    html += {
+      h2: `<h4>${text}</h4>`,
+      h3: `<h5>${text}</h5>`,
+      p: `<p>${text}</p>`,
+      code: `<pre>${text}</pre>`,
+      tip: `<div class="guide-tip">💡 ${text}</div>`,
+      warn: `<div class="guide-warn">⚠ ${text}</div>`,
+    }[kind] || '';
+  }
+  close();
+  return `<div class="guide">${html}</div>`;
+}
 
-Songs with a songsheet link show 📄 - click it to open the songsheet.
-
-Right-click a song for more: Open Songsheet, Move Up / Down, Replace with… (swap it for another song in the same place, e.g. one that was renamed in the spreadsheet), Remove, or Add to Set.
-
-Where things are kept: start JJ's Setlist with “${LAUNCHER}” and your settings are saved in config.json and your setlists in the setlists folder, next to the app - the same files the desktop app uses. Without it (e.g. index.html double-clicked), they're kept in this browser only; File ▸ Export This Setlist (.json) and File ▸ Import Saved Setlists move them across. The label next to the song total shows which is in use.`;
+async function showGuide(name) {
+  const guide = GUIDES[name];
+  const shown = dialog(guide.title, guideHtml(guide.content()), [
+    ...(guide.actions || []).map(([label, value]) => ({ label, value })),
+    { label: 'Close', value: false, primary: true },
+  ], true);
+  $('#dialogBody').scrollTop = 0;                // start at the top, not where the last guide was
+  const ans = await shown;
+  if (ans === 'xlsx' || ans === 'csv') createTemplate(ans);
+}
 
 function helpShortcuts() {
   const rows = [
@@ -1900,23 +2085,12 @@ function helpShortcuts() {
     ['Remove song from set', 'Delete'], ['Move the selection', '↑ / ↓'],
     ['Song menu (Replace with…, Move, Remove…)', 'Right-click, or Shift+F10'],
     ['Text size', 'View menu, or the browser zoom'],
+    ['How to use - the basics', 'F1'],
   ];
   dialog('Keyboard Shortcuts', '<table>' + rows.map(([a, k]) => `<tr><td>${esc(k)}</td><td>${esc(a)}</td></tr>`).join('') + '</table>'
     + '<p class="muted">The desktop app uses Ctrl+1…4 and Ctrl+L. In a browser those switch tabs and go to the address bar, so they use Alt here.</p>',
   undefined, true);
 }
-
-const HELP_SPREADSHEET = `The library is read from the first worksheet of an Excel workbook (.xlsx) or a CSV file. Row 1 holds the headings - any order, capitals don't matter, extra columns are ignored:
-
-   SONG NAME (required) - or Title, Song, Name, Track
-   Artist - or Band, Performer, Original Artist
-   Style - or Genre, Type
-   Vocalist - or Singer, Vocals, Lead Vocal
-   Songsheet - or Link, URL, PDF, Sheet, Chart
-
-Songsheet links can be embedded behind the song name in Excel (Ctrl+K), a =HYPERLINK("url", "Song") formula, or written out in a Songsheet column (this also works in CSV).
-
-Google Drive links work best in the browser. Links to PDF files on your computer only open when this page is in the same folder as them.`;
 
 // ---------------------------------------------------------------- templates
 // Help > Create Template Spreadsheet / CSV: a ready-to-fill song list with the
@@ -2028,14 +2202,7 @@ async function showTemplateSteps(csv, saved, filename) {
   }
 }
 
-async function spreadsheetGuide() {
-  const ans = await dialog('Setting Up Your Spreadsheet', HELP_SPREADSHEET, [
-    { label: 'Create Template CSV', value: 'csv' },
-    { label: 'Create Template Spreadsheet', value: 'xlsx' },
-    { label: 'OK', value: false, primary: true },
-  ]);
-  if (ans) createTemplate(ans);
-}
+function spreadsheetGuide() { return showGuide('spreadsheet'); }
 
 function about() {
   dialog('About', `<div style="text-align:center"><img src="logo.png" width="110" alt=""><h3 style="margin:8px 0 2px">${APP_NAME}</h3>
@@ -2058,8 +2225,10 @@ const ACTIONS = {
   focusLibrary: () => libList.focus(),
   fontBigger: () => setFont(state.fontSize + 1), fontSmaller: () => setFont(state.fontSize - 1),
   fontNormal: () => setFont(DEFAULT_FONT), colours: coloursDialog,
-  helpBasics: () => dialog('The Basics', HELP_BASICS), helpShortcuts,
-  helpSpreadsheet: () => spreadsheetGuide(),
+  helpBasics: () => showGuide('basics'), helpShortcuts,
+  helpSpreadsheet: () => showGuide('spreadsheet'),
+  helpCsv: () => showGuide('csv'),
+  helpAccount: () => showGuide('account'),
   templateXlsx: () => createTemplate('xlsx'),
   templateCsv: () => createTemplate('csv'),
   support: () => dialog('Support', `<p>${APP_NAME} is free and open source. If it's useful to you, you can buy us a coffee - any amount, entirely optional:</p>`
@@ -2197,6 +2366,7 @@ function wireEvents() {
         focusSet(+(e.code.slice(-1) || e.key) - 1);
       } else if (e.code === 'KeyL') { e.preventDefault(); libList.focus(); }
     }
+    if (e.key === 'F1') { e.preventDefault(); showGuide('basics'); }
     if (e.key === 'Escape') closeMenus();
   });
 

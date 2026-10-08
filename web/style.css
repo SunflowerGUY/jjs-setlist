@@ -316,3 +316,18 @@ ol.steps li { margin: 5px 0; }
 #account { margin-left: auto; padding: 3px 4px; }
 #account button { padding: 3px 12px; }
 #dbLabel { flex: 1 1 160px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- help guides */
+#dialog:has(.guide) { width: min(780px, calc(100vw - 32px)); max-width: none; }
+#dialogBody:has(.guide) { max-height: 68vh; padding-right: 6px; }
+.guide { line-height: 1.5; }
+.guide h4 { margin: 18px 0 6px; font-size: 1.02rem; color: var(--blue); }
+.guide h4:first-child { margin-top: 0; }
+.guide h5 { margin: 12px 0 4px; font-size: .95rem; }
+.guide p { margin: 6px 0; }
+.guide ul, .guide ol { margin: 4px 0 8px; padding-left: 1.5em; }
+.guide li { margin: 3px 0; }
+.guide pre { background: #f3f5f8; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; font-size: .9em; }
+.guide-tip, .guide-warn { border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.guide-tip { background: #eef6ff; border: 1px solid #c9def7; }
+.guide-warn { background: #fff4e5; border: 1px solid #f5d29c; color: #7a3f00; }

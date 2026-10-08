@@ -39,6 +39,7 @@
 - **Online accounts (optional)**: each person signs in with **any email address and a password** (no Gmail needed), or with Google, and gets their own song library, settings and setlists, kept separate from everyone else's. Works from any computer. *(Needs a free Firebase project. See **Online accounts** below.)*
 - **Saves to real files** when started with `Start JJ's Setlist.bat`: settings go in `config.json` and setlists in the `setlists` folder, the same files the desktop app uses. The song library and the setlist on screen are also remembered, so a reload or closed tab loses nothing.
 - **Template generators**: *Help ▸ Create Template Spreadsheet…* (or *…CSV…*) makes a ready-to-fill song list with the right headings and example rows, then shows the next steps. With the helper running, it's saved in the project folder and **Open it in Excel** opens it for you.
+- **Built-in help** (*Help* menu, or F1): the basics, keyboard shortcuts, full guides to setting up your song spreadsheet or CSV file, and your online account.
 - **Drag files onto the window**: a spreadsheet opens as the song database, and `.json` files are imported as setlists.
 
 ---
@@ -176,12 +177,6 @@ Plain HTML, CSS and JavaScript, with no build step. It's a port of the desktop a
 - [SortableJS](https://sortablejs.github.io/Sortable/) 1.15.2 handles drag and drop with mouse, touch and pen.
 
 Both are bundled in `web/lib/` (copied from cdnjs and checked against its published hashes), so nothing loads from the internet.
-
-## Still to do
-
-- **The longer help guides** from the desktop app (more tips, the full spreadsheet and CSV guides).
-
----
 
 ## Sharing it with your band (Windows, Mac and Linux)
 
