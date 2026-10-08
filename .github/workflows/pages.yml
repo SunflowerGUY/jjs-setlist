@@ -25,6 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # Stamp the app's files with this update, so browsers fetch the new
+      # versions at once instead of using copies they kept for a while.
+      - name: Version file links
+        run: sed -i "s/?v=dev/?v=${GITHUB_SHA::8}/g" web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
