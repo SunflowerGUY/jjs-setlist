@@ -160,7 +160,7 @@ It runs on **Firebase** (Google's free service for this; the free plan easily co
 
 1. At **console.firebase.google.com**, sign in with your Google account and **Create a project** (e.g. `jjs-setlist`), with Google Analytics off.
 2. **Authentication ▸ Get started ▸ Sign-in method:** enable **Email/Password** and **Google**.
-3. **Firestore Database ▸ Create database:** location **australia-southeast1 (Sydney)**, *production mode*. Then **Rules:** replace the text with the contents of **`firestore.rules`** and **Publish**.
+3. **Firestore Database ▸ Create database:** location closest to you, e.g. **australia-southeast2 (Melbourne)**, *production mode*. Then **Rules:** replace the text with the contents of **`firestore.rules`** and **Publish**.
 4. **Project settings ▸ General ▸ Your apps ▸ Web (`</>`):** register an app, copy its `firebaseConfig` values into **`web/firebase-config.js`** (instructions inside).
 5. When the app is hosted online (e.g. GitHub Pages), add its address under **Authentication ▸ Settings ▸ Authorized domains**. `localhost` is there already.
 
