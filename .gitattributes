@@ -1,0 +1,6 @@
+# Keep the right line endings for each system, whatever computer commits them.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.txt text eol=crlf
+*.png binary
+*.xlsx binary

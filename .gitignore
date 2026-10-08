@@ -1,0 +1,39 @@
+# JJ's Setlist - browser edition.
+# ALLOW-LIST: everything is left out of the repository unless listed below,
+# so personal files (your song spreadsheet, saved setlists, config.json with
+# your Google Drive link, test accounts...) can never be published by accident.
+
+/*
+
+# The app
+!/web/
+!/serve.py
+!/Start JJ's Setlist.bat
+!/Start JJ's Setlist.command
+!/start-jjs-setlist.sh
+!/READ ME FIRST.txt
+!/make_package.py
+!/Make Package.bat
+!/firestore.rules
+
+# Repository files
+!/README.md
+!/LICENSE
+!/.gitignore
+!/.gitattributes
+!/.github/
+
+# README pictures
+!/docs/
+/docs/*
+!/docs/web-*.png
+!/ARTWORK/
+/ARTWORK/*
+!/ARTWORK/JJ SETLIST Logo Source.png
+!/ARTWORK/JJ SETLIST Icon Source.png
+
+# Never, even inside allowed folders
+__pycache__/
+*.pyc
+*.part
+web/__test-*

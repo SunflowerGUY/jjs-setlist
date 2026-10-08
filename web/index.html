@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JJ's Setlist</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="style.css">
+<!-- Bundled copies (SheetJS 0.18.5, SortableJS 1.15.2 from cdnjs), so no internet is needed -->
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/Sortable.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <!-- Menu bar -->
+  <nav class="menubar" id="menubar">
+    <div class="menu">
+      <button class="menu-title">File</button>
+      <div class="menu-items">
+        <button data-action="openDb">Open Song Database… <kbd data-keys="Ctrl+O"></kbd></button>
+        <button data-action="loadDrive">Load Song Database from Google Drive</button>
+        <button data-action="dbSettings">Song Database Settings (Google Drive)…</button>
+        <hr>
+        <button data-action="newSetlist">New Setlist</button>
+        <button data-action="save">Save Setlist <kbd data-keys="Ctrl+S"></kbd></button>
+        <button data-action="importSetlists">Import Saved Setlists (.json)…</button>
+        <button data-action="exportJson">Export This Setlist (.json)…</button>
+        <button data-action="exportText">Export This Setlist as Text</button>
+        <button data-action="exportCsv">Export This Setlist as CSV</button>
+        <hr>
+        <button data-action="printSetlist">Print / Save as PDF: This Setlist <kbd data-keys="Ctrl+P"></kbd></button>
+        <button data-action="printSonglist">Print / Save as PDF: Song List</button>
+        <hr>
+        <button data-action="exportDbCsv">Export Song Database as CSV (with web links)</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-title">Sets</button>
+      <div class="menu-items">
+        <button data-action="set0">Go to Set 1 <kbd data-keys="Alt+1"></kbd></button>
+        <button data-action="set1">Go to Set 2 <kbd data-keys="Alt+2"></kbd></button>
+        <button data-action="set2">Go to Set 3 <kbd data-keys="Alt+3"></kbd></button>
+        <button data-action="set3">Go to Set 4 <kbd data-keys="Alt+4"></kbd></button>
+        <button data-action="focusLibrary">Go to Song Library <kbd data-keys="Alt+L"></kbd></button>
+        <hr>
+        <button data-action="clearAll">Clear All Sets</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-title">View</button>
+      <div class="menu-items">
+        <button data-action="fontBigger">Larger Text</button>
+        <button data-action="fontSmaller">Smaller Text</button>
+        <button data-action="fontNormal">Normal Text Size</button>
+        <hr>
+        <button data-action="colours">Songlist &amp; Setlist Colours…</button>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="menu-title">Help</button>
+      <div class="menu-items">
+        <button data-action="helpBasics">The Basics</button>
+        <button data-action="helpShortcuts">Keyboard Shortcuts</button>
+        <button data-action="helpSpreadsheet">Setting Up Your Spreadsheet</button>
+        <button data-action="templateXlsx">Create Template Spreadsheet…</button>
+        <button data-action="templateCsv">Create Template CSV…</button>        <hr>
+        <button data-action="support">Support JJ's Setlist ☕</button>
+        <button data-action="about">About</button>
+      </div>
+    </div>
+    <span id="account" hidden></span>
+  </nav>
+
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <div class="row">
+      <button data-action="openDb">Open Song Database…</button>
+      <span id="dbLabel" class="muted">No song database loaded</span>
+      <span class="spacer"></span>
+      <label for="saved">Saved setlists:</label>
+      <select id="saved"></select>
+      <button data-action="load">Load</button>
+      <button data-action="deleteSaved">Delete</button>
+      <button data-action="newSetlist">New</button>
+    </div>
+    <div class="row">
+      <label for="setName">Setlist name:</label>
+      <input id="setName" type="text" placeholder="e.g. The Local Pub - October 2026" autocomplete="off">
+      <button data-action="save" class="primary">Save Setlist</button>
+      <span class="muted hint">Include Venue &amp; Date in Setlist Name.</span>
+      <span class="spacer"></span>
+      <span id="storageLabel" class="muted storage"></span>
+      <span id="total" class="muted">Total: 0 songs</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Song library -->
+    <section class="panel library" id="libraryPanel">
+      <h2>Song Library</h2>
+      <div class="search">
+        <label for="search">Search:</label>
+        <input id="search" type="search" autocomplete="off" placeholder="Song, artist, style or vocalist">
+      </div>
+      <div class="lib-frame">
+        <ul id="libList" class="songs lib-list" tabindex="0" data-list="lib"></ul>
+        <div id="getStarted" class="get-started" hidden>
+          <img src="logo.png" alt="" width="90">
+          <p><strong>Welcome to JJ's Setlist.</strong></p>
+          <p>Open your song spreadsheet (<code>.xlsx</code> or <code>.csv</code>) to fill the Song Library.
+            It stays on this device. The songs are remembered in this browser for next time.</p>
+          <button data-action="openDb" class="primary">Open Song Spreadsheet…</button>
+          <p class="small">No song spreadsheet yet? <button data-action="templateXlsx" class="link-button">Create a template</button> with the right headings to fill in.</p>
+          <p class="small">You can also drag a spreadsheet or saved setlists (<code>.json</code>) onto this window.</p>
+        </div>
+      </div>
+      <div class="panel-buttons">
+        <button data-action="addSelected" id="addBtn">Add to Set 1 ▶</button>
+        <button data-action="openSheet">📄 Open Songsheet</button>
+        <span class="spacer"></span>
+        <span id="libCount" class="muted"></span>
+      </div>
+    </section>
+
+    <!-- Sets (built by app.js) -->
+    <section class="sets" id="sets"></section>
+  </main>
+
+  <footer class="status" id="status">Ready.</footer>
+</div>
+
+<!-- Printout (only visible when printing) -->
+<div id="printArea"></div>
+
+<dialog id="dialog">
+  <form method="dialog">
+    <h3 id="dialogTitle"></h3>
+    <div id="dialogBody"></div>
+    <div id="dialogButtons" class="dialog-buttons"></div>
+  </form>
+</dialog>
+
+<input type="file" id="dbFile" accept=".xlsx,.xlsm,.csv" hidden>
+<input type="file" id="setlistFiles" accept=".json,application/json" multiple hidden>
+
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

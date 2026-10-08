@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// JJ's Setlist - who may read and write what in the online database.
+//
+// Everything a person saves lives under  users/{their account id}/...
+//   users/{uid}/data/settings     colours, text size, Google Drive link
+//   users/{uid}/data/library      their song library
+//   users/{uid}/setlists/{name}   their saved setlists
+//
+// A signed-in person can read and write ONLY their own part. Nobody can read,
+// list or change anyone else's - and anything not matched below is refused.
+//
+// To use: Firebase console > Firestore Database > Rules, paste this file in, Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

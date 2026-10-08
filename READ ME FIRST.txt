@@ -1,0 +1,63 @@
+JJ's Setlist - browser edition
+==============================
+
+Build, reorder, save and print gig setlists in your web browser.
+Settings and saved setlists are kept as files in this folder.
+
+It needs Python 3.8 or newer (nothing else to install). Start it with the
+file for your computer below. A small window opens - that's the "helper".
+Keep it open while you use the app (you can minimise it), and close it when
+you've finished. The app opens in your web browser at:
+
+    http://localhost:8765/
+
+Bookmark that address. It works whenever the helper is running.
+
+
+WINDOWS
+-------
+1. Unzip this folder somewhere handy (right-click the zip > Extract All...).
+2. Double-click "Start JJ's Setlist.bat".
+   If it says Python wasn't found, install it from
+   https://www.python.org/downloads/ - tick "Add python.exe to PATH" -
+   then double-click it again.
+
+
+MAC
+---
+1. Double-click the zip to unzip it, and move the folder somewhere handy
+   (e.g. your Documents folder).
+2. The first time only: right-click (or Control-click)
+   "Start JJ's Setlist.command" and choose Open, then click Open again.
+   (macOS asks because the file didn't come from the App Store.)
+   After that, just double-click it.
+3. A Terminal window opens and the app opens in your browser.
+   If macOS offers to install the "command line developer tools", click
+   Install, wait for it to finish, then double-click the file again.
+   Or install Python from https://www.python.org/downloads/macos/
+
+If it says "you do not have appropriate access privileges", open Terminal,
+type   chmod +x   followed by a space, drag the .command file into the
+Terminal window, press Return, then double-click the file again.
+
+
+LINUX
+-----
+1. Unzip the folder somewhere handy (e.g. your home folder).
+2. In a terminal, in that folder:
+       ./start-jjs-setlist.sh
+   or double-click start-jjs-setlist.sh and choose "Run" / "Run in Terminal".
+3. Optional: add it to your applications menu with
+       ./start-jjs-setlist.sh --install
+   (and remove it again with --uninstall).
+If Python 3 is missing, install it, e.g.  sudo apt install python3
+
+
+WITHOUT THE HELPER
+------------------
+You can also double-click web/index.html. Everything works except the
+Google Drive song database, but settings and setlists are then kept inside
+the browser only, not in this folder. The label next to the song total shows
+which is in use.
+
+More details: README.md.
