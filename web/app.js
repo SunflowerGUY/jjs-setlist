@@ -1150,7 +1150,8 @@ async function adminBands(message = '') {
         ${rows}
         <p class="small muted">Send a band's invitation to its members. Everyone can use the same code until you revoke it.
           Revoking stops new sign-ups; members already in keep their access.</p></div>`,
-    [{ label: 'Create a Band…', value: { act: 'create' } }, { label: 'Close', value: false, primary: true }], true);
+    [{ label: bands.length ? 'Create Another Band…' : 'Create a Band…', value: { act: 'create' } },
+      { label: 'Close', value: false, primary: true }], true);
     $('#dialogBody').querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => dialogFinish({ act: btn.dataset.act, id: btn.dataset.band })));
     const ans = await p;
     if (!ans) return;
