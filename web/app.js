@@ -579,6 +579,20 @@ async function cloudSetlists(root = cloudRoot()) {
   return found;
 }
 
+/** Just signed in: wait until the database knows. With the app open in another tab too,
+    the first reads can be refused for a moment while that tab catches up with the new login. */
+async function loginReady(user) {
+  for (let tries = 0; tries < 20; tries++) {
+    try {
+      await cloud.db.collection('admins').doc(user.uid).get();   // anyone may check their own
+      return;
+    } catch (err) {
+      if (err?.code !== 'permission-denied') return;            // e.g. offline: carry on as before
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+}
+
 /** Is this login allowed in? The administrator, or signed up with an invitation code. */
 async function accountStatus(user = cloud.user) {
   const [adminDoc, regDoc] = await Promise.all([
@@ -845,8 +859,10 @@ function accountMenu() {
 }
 
 /** The sign-in window: members sign in; new people sign up with an invitation
-    code (which says which band they join), or ask for one. Loops until done. */
-async function signIn(view = 'signin', message = '', email = '', invite = null) {
+    code (which says which band they join), or ask for one. Loops until done.
+    gate = true: the website's signed-out page - no Cancel, as there's nothing behind it.
+    Returns true once signed in (the app is then reopening). */
+async function signIn(view = 'signin', message = '', email = '', invite = null, gate = false) {
   let tone = 'bad', codeText = invite?.code || '', name = '';
   let joinAfter = null;                      // tried to sign up again: join this band once signed in
   for (;;) {
@@ -854,7 +870,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
     const views = {
       signin: {
         title: 'Sign in to JJ\'s Setlist',
-        html: `<div class="account-form">${msg}
+        html: `<div class="account-form">${gate ? '<img src="logo.png" alt="" class="ac-logo">' : ''}${msg}
           ${joinAfter ? `<p class="ac-band">🎵  Signing in also adds you to <b>${esc(joinAfter.bandName)}</b></p>` : ''}
           <h4 class="ac-head">Already a member?</h4>
           <label for="acEmail">Email address</label>
@@ -938,7 +954,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
     const v = views[view];
     let fields = null;
     const showMsg = (text) => { const m = $('#acMsg'); m.className = 'drive-result bad'; m.textContent = text; m.hidden = false; };
-    const p = dialog(v.title, v.html, v.buttons, true);
+    const p = dialog(v.title, v.html, gate ? v.buttons.filter((b) => b.value !== false) : v.buttons, true);
     const body = $('#dialogBody');
     body.querySelectorAll('input').forEach((inp) => inp.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
@@ -990,14 +1006,16 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         let user;
         if (ans === 'google') {
           ({ user } = await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()));
+          await loginReady(user);
           if ((await accountStatus(user)).registered) {          // already a member: join the band
             if (name && !user.displayName) await user.updateProfile({ displayName: name }).catch(() => {});
             await joinBand(user, invite);
             location.reload();
-            return;
+            return true;
           }
         } else {
           ({ user } = await cloud.auth.createUserWithEmailAndPassword(fields.email, fields.password));
+          await loginReady(user);
         }
         try {
           // The name typed (for Google, if left blank, the Google account's own name).
@@ -1010,13 +1028,14 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         if (ans !== 'google') await user.sendEmailVerification().catch(() => {});
         status('Account created - opening your band…');
         location.reload();
-        return;
+        return true;
       }
       // Signing in: only for accounts that signed up with a code (or the administrator).
       status('Signing in…');
       const result = ans === 'google'
         ? await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
         : await cloud.auth.signInWithEmailAndPassword(fields.email, fields.password);
+      await loginReady(result.user);
       if (!(await accountStatus(result.user)).registered) {
         // A Google login made just now, without a code: remove it again.
         if (result.additionalUserInfo?.isNewUser) await result.user.delete().catch(() => {});
@@ -1032,7 +1051,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
       }
       status('Signed in - opening your account…');
       location.reload();
-      return;
+      return true;
     } catch (err) {
       tone = 'bad';
       message = cloudMessage(err);
@@ -3034,6 +3053,20 @@ function listKey(e, list) {
 }
 
 // ---------------------------------------------------------------- start
+/** The website is for members only (index.html marks it): signed out, just the sign-in window. */
+const SIGN_IN_REQUIRED = document.body.classList.contains('gate');
+
+/** The website, signed out: a white page with only the sign-in window. Signing in reopens the app. */
+async function signInGate() {
+  if (!cloud.enabled) {                       // Firebase didn't load (no internet?)
+    await dialog('JJ\'s Setlist', 'JJ\'s Setlist couldn\'t connect just now.\n\nCheck the internet connection, then try again.',
+      [{ label: 'Try Again', value: true, primary: true }]);
+    location.reload();
+    return;
+  }
+  while (!await signIn('signin', '', '', null, true)) { /* Esc, or a request sent: show it again */ }
+}
+
 async function start() {
   if (typeof XLSX === 'undefined' || typeof Sortable === 'undefined') {
     document.body.insertAdjacentHTML('afterbegin',
@@ -3041,15 +3074,18 @@ async function start() {
   }
   // Where to save: a signed-in online account, else the helper's files, else this browser.
   await Promise.all([initCloud(), findHelper()]);
+  if (SIGN_IN_REQUIRED && !cloud.user) return signInGate();
   let newAccount = false;
   if (cloud.user) {
     try {
       newAccount = await loadCloudData();
       mode = 'cloud';
+      document.body.classList.remove('gate');
     } catch (err) {
       console.error(err);
       store.prefix = BASE_PREFIX;
       loadLocalState();
+      if (err.code !== 'jjs/not-registered') document.body.classList.remove('gate');   // signed in, but offline
       if (err.code === 'jjs/not-registered') {
         // A login that didn't come with an invitation code: it can't use the app.
         messageBox('Sign-up needs an invitation code', `${cloudMessage(err)}\n\nYou've been signed out. If you have a code, choose Sign in ▸ “New here?”.`)

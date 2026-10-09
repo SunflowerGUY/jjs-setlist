@@ -11,6 +11,12 @@
 <script src="lib/Sortable.min.js"></script>
 </head>
 <body>
+<script>
+  // The website is for members only: until someone signs in it shows just the sign-in window
+  // (app.js takes the class off once they have). The copy on this computer works without signing in.
+  if (location.protocol !== 'file:' && (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
+      || new URLSearchParams(location.search).has('emulator'))) document.body.classList.add('gate');
+</script>
 <div id="app">
   <!-- Menu bar -->
   <nav class="menubar" id="menubar">

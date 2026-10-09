@@ -36,7 +36,7 @@
 - **Print or Save as PDF**: landscape A4, aligned columns, a set is never split across pages, page numbers in the footer. Also prints the song list (or just the songs matching a search).
 - **Export** a setlist as text or CSV, and the song database as CSV with the web links written out.
 - **Adjustable text size and colours**: *View ▸ Songlist & Setlist Colours* gives a live preview and a readability (contrast) check.
-- **Online accounts (optional)**: each person signs in with **any email address and a password** (no Gmail needed), or with Google, and gets their own song library, settings and setlists, kept separate from everyone else's. Works from any computer. *(Needs a free Firebase project. See **Online accounts** below.)*
+- **Online accounts** (needed on the website; optional for the copy on your own computer): each person signs in with **any email address and a password** (no Gmail needed), or with Google, and gets their own song library, settings and setlists, kept separate from everyone else's. Works from any computer. *(Needs a free Firebase project. See **Online accounts** below.)*
 - **Saves to real files** when started with `Start JJ's Setlist.bat`: settings go in `config.json` and setlists in the `setlists` folder, the same files the desktop app uses. The song library and the setlist on screen are also remembered, so a reload or closed tab loses nothing.
 - **Template generators**: *Help ▸ Create Template Spreadsheet…* (or *…CSV…*) makes a ready-to-fill song list with the right headings and example rows, then shows the next steps. With the helper running, it's saved in the project folder and **Open it in Excel** opens it for you.
 - **Built-in help** (*Help* menu, or F1): the basics, keyboard shortcuts, full guides to setting up your song spreadsheet or CSV file, and your online account.
@@ -46,7 +46,7 @@
 
 ## Getting started
 
-**Online:** open **https://sunflowerguy.github.io/jjs-setlist/** and bookmark it. Nothing to install. Settings and setlists are kept in that browser (use *File ▸ Export* / *Import* to move them).
+**Online:** open **https://sunflowerguy.github.io/jjs-setlist/** and bookmark it. Nothing to install. The website is **for members only**: it shows just the sign-in window until you sign in (new members need an invitation code, see **Online accounts** below). Your settings and setlists are then kept in your account.
 
 **On your own computer**, with settings and setlists kept as files: download [the zip](https://github.com/SunflowerGUY/jjs-setlist/releases/latest/download/JJs-Setlist-Browser-Edition.zip), unzip it, and start it with the launcher for your computer. A small window opens (the **helper**), and the app opens in your web browser at **`http://localhost:8765/`**. Bookmark that address.
 

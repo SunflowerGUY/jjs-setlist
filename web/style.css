@@ -339,6 +339,13 @@ ol.steps li { margin: 5px 0; }
 .badge { display: inline-block; min-width: 1.4em; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--missing); color: #fff; font-size: .8em; text-align: center; }
 .account-form .ac-head { margin: 4px 0 0; font-size: 1rem; }
 .account-form .ac-band { font-size: 1.05rem; background: #eef6ff; border: 1px solid #c9def7; border-radius: 6px; padding: 8px 12px; margin: 0 0 6px; }
+/* Signed out on the website: a plain white page with just the sign-in window. */
+body.gate { background: #fff; }
+body.gate #app { display: none; }
+body.gate dialog::backdrop { background: #fff; }
+body.gate dialog { box-shadow: 0 4px 24px rgb(0 0 0 / .12); border: 1px solid var(--line); }
+body.gate #dialogBody { max-height: none; }   /* nothing behind it: use the page's height */
+.account-form .ac-logo { display: block; width: 90px; margin: 0 auto 10px; }
 .account-form textarea { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
 #dialog:has(.admin) { width: min(760px, calc(100vw - 32px)); max-width: none; }
 .admin .band-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 8px; }
