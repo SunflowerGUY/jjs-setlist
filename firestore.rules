@@ -88,7 +88,10 @@ service cloud.firestore {
           && (isAdmin() || validCode(request.resource.data.code, bandId));
         // Leave (yourself) or remove (the administrator).
         allow delete: if signedIn() && (me() == uid || isAdmin());
-        allow update: if false;
+        // Change your own name (shown to the band) - nothing else.
+        allow update: if signedIn() && me() == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40;
       }
       match /data/{docId} {
         allow read, write: if isAdmin() || isMember(bandId);

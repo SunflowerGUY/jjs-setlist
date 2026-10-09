@@ -742,8 +742,50 @@ async function joinBand(user, invite) {
 }
 
 // ---------------------------------------------------------------- account: sign in, sign up, menu
+/** My name (e.g. "Gary") if I've given one, otherwise my email address. */
 function accountName() {
-  return cloud.user?.email || cloud.user?.displayName || 'your account';
+  return cloud.user?.displayName || cloud.user?.email || 'your account';
+}
+
+// ---------------------------------------------------------------- my name: one name, shown in all my bands
+const NAME_MAX = 40;
+function tidyName(text) { return String(text || '').trim().replace(/\s+/g, ' ').slice(0, NAME_MAX); }
+
+/** Save my name on my login, and in each band I'm a member of (so their member lists show it). */
+async function saveMyName(name) {
+  await cloud.user.updateProfile({ displayName: name });
+  const mine = await cloudUserDoc().collection('bands').get();
+  await Promise.all(mine.docs.map((d) => cloud.db.collection('bands').doc(d.id).collection('members')
+    .doc(cloud.user.uid).update({ name }).catch(() => {})));   // not a member there (the administrator's own bands)
+  renderAccount();
+  renderStorage();
+}
+
+/** "Change my name…" - or, first = true, asking someone who hasn't given one yet. */
+async function changeName(first = false) {
+  let name = '';
+  const p = dialog(first ? 'What should your bandmates call you?' : 'Change my name', `<div class="account-form">
+      <label for="nmName">Your name</label>
+      <input id="nmName" type="text" autocomplete="name" spellcheck="false" maxlength="${NAME_MAX}" value="${esc(cloud.user.displayName || '')}" placeholder="e.g. Gary">
+      <p class="small muted">Shown to the other members of your bands instead of your email address.
+        It's one name for all your bands. You can change it any time from the menu under your name (top right).</p></div>`,
+  [{ label: first ? 'Later' : 'Cancel', value: false }, { label: 'Save', value: true, primary: true, check: () => {
+    name = tidyName($('#nmName').value);
+    if (!name) $('#nmName').focus();
+    return !!name;
+  } }], true);
+  $('#nmName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...$('#dialogButtons').children].pop().click(); } });
+  $('#nmName').focus();
+  if (!await p) {
+    if (first) store.set('nameAsked', true, accountPrefix());   // "Later": don't ask again on this computer
+    return;
+  }
+  try {
+    await saveMyName(name);
+    status(`Your name is now “${name}”.`);
+  } catch (err) {
+    messageBox('Change my name', cloudMessage(err));
+  }
 }
 
 function renderAccount() {
@@ -784,7 +826,7 @@ function accountMenu() {
   const hasPassword = (cloud.user.providerData || []).some((p) => p.providerId === 'password');
   const inBand = mode === 'cloud' && cloud.band;
   showContextMenu(r.left, r.bottom + 4, [
-    { label: `Signed in as ${accountName()}${cloud.admin ? '  ·  administrator' : ''}`, note: true, plain: true },
+    { label: `Signed in as ${accountName()}${cloud.user.displayName && cloud.user.email ? ` (${cloud.user.email})` : ''}${cloud.admin ? '  ·  administrator' : ''}`, note: true, plain: true },
     ...(cloud.admin ? [
       { label: 'Bands & invitation codes…', action: adminBands },
       { label: `Invitation requests${cloud.requests ? ` (${cloud.requests} waiting)` : ''}…`, action: adminRequests },
@@ -795,6 +837,7 @@ function accountMenu() {
     { label: `Copy setlists from this computer into ${inBand ? cloud.band.name : 'my account'}…`, action: () => offerImport(false) },
     ...(inBand && !cloud.admin ? [{ label: `Leave ${cloud.band.name}…`, action: leaveBand }] : []),
     '-',
+    { label: cloud.user.displayName ? 'Change my name…' : 'Add my name…', action: () => changeName() },
     ...(hasPassword ? [{ label: 'Change my password…', action: changePassword }] : []),
     { label: 'Sign out', action: signOut },
     { label: 'Delete my account…', action: deleteAccount },
@@ -804,13 +847,15 @@ function accountMenu() {
 /** The sign-in window: members sign in; new people sign up with an invitation
     code (which says which band they join), or ask for one. Loops until done. */
 async function signIn(view = 'signin', message = '', email = '', invite = null) {
-  let tone = 'bad', codeText = invite?.code || '';
+  let tone = 'bad', codeText = invite?.code || '', name = '';
+  let joinAfter = null;                      // tried to sign up again: join this band once signed in
   for (;;) {
     const msg = `<p id="acMsg" class="drive-result ${tone}"${message ? '' : ' hidden'}>${esc(message)}</p>`;
     const views = {
       signin: {
         title: 'Sign in to JJ\'s Setlist',
         html: `<div class="account-form">${msg}
+          ${joinAfter ? `<p class="ac-band">🎵  Signing in also adds you to <b>${esc(joinAfter.bandName)}</b></p>` : ''}
           <h4 class="ac-head">Already a member?</h4>
           <label for="acEmail">Email address</label>
           <input id="acEmail" type="email" autocomplete="username" spellcheck="false" value="${esc(email)}">
@@ -823,6 +868,8 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
           <div class="drive-row"><input id="acCode" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. JAZZ-7K2Q-M4XP" value="${esc(codeText)}">
             <button type="button" id="acSignUp" disabled>Sign up with this code</button></div>
           <div id="acCodeResult" class="drive-result"></div>
+          <p class="small muted">Already have an account, and been given a code for another band? You don't need a second account:
+            sign in above, then click your name (top right) ▸ Join a band with an invitation code.</p>
           <p class="small muted">No code? <button type="button" class="link-button" id="acRequest">Request an invitation code</button></p>
         </div>`,
         buttons: [{ label: 'Cancel', value: false }, { label: 'Sign In', value: 'go', primary: true, check: () => {
@@ -837,6 +884,10 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         title: `Join ${invite?.bandName || 'a band'} on JJ's Setlist`,
         html: `<div class="account-form">${msg}
           <p class="ac-band">🎵  You're joining <b>${esc(invite?.bandName || '')}</b></p>
+          <p class="small muted">Already have a JJ's Setlist account (for another band, say)? You don't need a second one:
+            click Back and sign in - or carry on with your usual email address and you'll be offered sign-in instead.</p>
+          <label for="acName">Your name <span class="muted">(what your bandmates will see)</span></label>
+          <input id="acName" type="text" autocomplete="name" spellcheck="false" maxlength="${NAME_MAX}" value="${esc(name)}" placeholder="e.g. Gary">
           <button type="button" class="google-btn" id="acGoogle"><b>G</b>  Sign up with Google</button>
           <div class="or"><span>or with any email address</span></div>
           <label for="acEmail">Email address</label>
@@ -851,6 +902,8 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         buttons: [{ label: 'Back', value: 'back' }, { label: 'Cancel', value: false },
           { label: 'Create My Account', value: 'go', primary: true, check: () => {
             const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
+            name = tidyName($('#acName').value);
+            if (!name) { showMsg('Please type your name - the one your bandmates will see.'); $('#acName').focus(); return false; }
             if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return false; }
             if (pw.length < 8) { showMsg('Please choose a password of at least 8 characters.'); $('#acPassword').focus(); return false; }
             if (pw !== $('#acPassword2').value) { showMsg("The two passwords don't match."); return false; }
@@ -893,7 +946,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
       if (inp.id === 'acCode') { if (!$('#acSignUp').disabled) $('#acSignUp').click(); return; }
       [...$('#dialogButtons').children].find((b) => b.classList.contains('primary')).click();
     }));
-    $('#acGoogle')?.addEventListener('click', () => dialogFinish('google'));
+    $('#acGoogle')?.addEventListener('click', () => { if ($('#acName')) name = tidyName($('#acName').value); dialogFinish('google'); });
     $('#acForgot')?.addEventListener('click', () => { fields = { email: $('#acEmail').value.trim() }; dialogFinish('forgot'); });
     $('#acRequest')?.addEventListener('click', () => { email = $('#acEmail')?.value.trim() || email; dialogFinish('to-request'); });
     if (view === 'signin') {
@@ -902,16 +955,16 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
       $('#acSignUp').addEventListener('click', () => { invite = found; codeText = found.code; dialogFinish('to-signup'); });
       (email ? $('#acPassword') : $('#acEmail')).focus();
     } else if (view === 'signup') {
-      $('#acEmail').focus();
+      (name ? $('#acEmail') : $('#acName')).focus();
     } else {
       $('#rqName').focus();
     }
 
     const ans = await p;
     if (!ans) return;
-    if (ans === 'to-signup') { view = 'signup'; message = ''; continue; }
+    if (ans === 'to-signup') { view = 'signup'; message = ''; joinAfter = null; continue; }
     if (ans === 'to-request') { view = 'request'; message = ''; continue; }
-    if (ans === 'back') { view = 'signin'; message = ''; continue; }
+    if (ans === 'back') { view = 'signin'; message = ''; joinAfter = null; continue; }
     email = fields?.email || email;
     document.body.classList.add('busy');
     cloud.busy = true;                        // finish the checks before the app reopens
@@ -938,6 +991,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         if (ans === 'google') {
           ({ user } = await cloud.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()));
           if ((await accountStatus(user)).registered) {          // already a member: join the band
+            if (name && !user.displayName) await user.updateProfile({ displayName: name }).catch(() => {});
             await joinBand(user, invite);
             location.reload();
             return;
@@ -946,6 +1000,8 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
           ({ user } = await cloud.auth.createUserWithEmailAndPassword(fields.email, fields.password));
         }
         try {
+          // The name typed (for Google, if left blank, the Google account's own name).
+          if (name) await user.updateProfile({ displayName: name });
           await completeSignUp(user, invite);
         } catch (err) {
           await user.delete().catch(() => {});                  // don't leave a half-made account
@@ -969,12 +1025,25 @@ async function signIn(view = 'signin', message = '', email = '', invite = null) 
         message = cloudMessage({ code: 'jjs/not-registered' });
         continue;
       }
+      // Came here from signing up again with a code: add the band to this account.
+      if (joinAfter && await lookUpCode(joinAfter.code)) {
+        const already = await cloud.db.collection('users').doc(result.user.uid).collection('bands').doc(joinAfter.bandId).get();
+        if (!already.exists) await joinBand(result.user, joinAfter);
+      }
       status('Signed in - opening your account…');
       location.reload();
       return;
     } catch (err) {
       tone = 'bad';
       message = cloudMessage(err);
+      if (view === 'signup' && err?.code === 'auth/email-already-in-use') {
+        // One account per person: sign in with it, and join this band too.
+        joinAfter = invite;
+        view = 'signin';
+        tone = 'ok';
+        message = `You already have a JJ's Setlist account with ${email}. Sign in with your usual password `
+          + `and you'll be added to ${invite.bandName} as well - you don't need a second account.`;
+      }
       status(message);
     } finally {
       cloud.busy = false;
@@ -1067,7 +1136,7 @@ async function deleteAccount() {
   const mine = await cloudSetlists(cloudUserDoc()).catch(() => ({}));
   const bands = cloud.bands.filter((b) => !cloud.admin);
   if (!await dialog('Delete my account',
-    `Delete the account ${accountName()} and everything in it?\n\n`
+    `Delete the account ${cloud.user.email || accountName()} and everything in it?\n\n`
     + `   •  your own ${plural(Object.keys(mine).length, 'saved setlist')}, song library and settings\n`
     + (bands.length ? `   •  your membership of ${bands.map((b) => b.name).join(', ')} (the bands' setlists stay, for the other members)\n` : '')
     + '\nThis cannot be undone. Export any setlists you want to keep first (File ▸ Export This Setlist).',
@@ -1106,8 +1175,10 @@ function inviteText(bandName, code, name = '') {
     + `1. Open ${SITE_URL}\n`
     + '2. Click "Sign in" (top right).\n'
     + '3. Under "New here?", type the invitation code, then click "Sign up with this code".\n'
-    + '4. Choose your email address and a password (or use Google).\n\n'
-    + `You'll then see ${bandName}'s songs and setlists. The confirmation email may land in your spam folder.\n`;
+    + '4. Type your name, and choose your email address and a password (or use Google).\n\n'
+    + `You'll then see ${bandName}'s songs and setlists. The confirmation email may land in your spam folder.\n\n`
+    + 'Already using JJ\'s Setlist with another band? Don\'t make a new account. Sign in as usual, then click your name '
+    + '(top right) > "Join a band with an invitation code" and type the code above. One account covers all your bands.\n';
 }
 
 async function copyText(text, what) {
@@ -1218,17 +1289,18 @@ async function adminMembers(band) {
   for (;;) {
     const snap = await cloud.db.collection('bands').doc(band.id).collection('members').get();
     const members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }))
-      .sort((a, b) => fold(a.email).localeCompare(fold(b.email)));
+      .sort((a, b) => fold(a.name || a.email || '').localeCompare(fold(b.name || b.email || '')));
     const joined = (m) => (m.joined?.toDate ? dateTimeText(m.joined.toDate().toISOString()) : '');
+    const who = (m) => (m.name ? `<b>${esc(m.name)}</b>${m.email ? ` <span class="muted">${esc(m.email)}</span>` : ''}` : esc(m.email || m.uid));
     const p = dialog(`${band.name} - members`, `<div class="admin">${members.map((m) => `<div class="band-row member-row">
-        <div>${esc(m.email || m.name || m.uid)} <span class="muted small">· joined ${esc(joined(m))}</span></div>
+        <div>${who(m)} <span class="muted small">· joined ${esc(joined(m))}</span></div>
         <button type="button" data-uid="${esc(m.uid)}">Remove</button></div>`).join('') || '<p class="muted">No members yet.</p>'}</div>`,
     [{ label: 'Close', value: false, primary: true }], true);
     $('#dialogBody').querySelectorAll('[data-uid]').forEach((btn) => btn.addEventListener('click', () => dialogFinish(btn.dataset.uid)));
     const uid = await p;
     if (!uid) return;
     const m = members.find((x) => x.uid === uid);
-    if (await confirmBox('Remove member', `Remove ${m.email || 'this member'} from ${band.name}?\n\nThey won't see the band's songs and setlists any more. Their own account and setlists stay.`, 'Remove')) {
+    if (await confirmBox('Remove member', `Remove ${m.name || m.email || 'this member'} from ${band.name}?\n\nThey won't see the band's songs and setlists any more. Their own account and setlists stay.`, 'Remove')) {
       await cloud.db.collection('bands').doc(band.id).collection('members').doc(uid).delete();
     }
   }
@@ -2565,17 +2637,21 @@ const GUIDES = {
       ['p', 'JJ\'s Setlist is by invitation: you need an invitation code from the administrator. The code also says which band you\'re joining.'],
       ['n', '1.  Click Sign in (top right). Under “New here?”, type the invitation code - it shows which band it\'s for.'],
       ['n', '2.  Click Sign up with this code.'],
-      ['n', '3.  Type your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters. Or click Sign up with Google.'],
+      ['n', '3.  Type your name (what your bandmates will see, e.g. Gary), your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters. Or click Sign up with Google.'],
       ['n', '4.  Click Create My Account. A message is sent to check your address: open it and click its link (look in the spam folder if it doesn\'t arrive).'],
       ['b', 'No code yet? Click Request an invitation code on the Sign in window, and send your name and email address. The administrator will be in touch.'],
       ['h2', 'Your band, and your own setlists'],
       ['b', 'In a band, its members share one song library and one set of saved setlists. Everyone has full access: anything a member saves, the others see.'],
-      ['b', 'You also have your own private setlists. Switch between them and your band(s) with the list at the top right, next to your email address.'],
+      ['b', 'You also have your own private setlists. Switch between them and your band(s) with the list at the top right, next to your name.'],
       ['b', 'The label next to the song total shows which is open, e.g. ☁ Saving to Jelly Jazz, or ☁ Saving to your account.'],
       ['b', 'Colours and text size are always your own; a band\'s Google Drive link (File ▸ Song Database Settings) is shared by its members.'],
-      ['b', 'Already signed up, and given a code for another band? Use Join a band with an invitation code in your account menu.'],
+      ['h2', 'In more than one band?'],
+      ['p', 'One account covers all your bands - don\'t make a second one. Given a code for another band, sign in as usual, then use Join a band with an invitation code in your account menu. Each band then appears in the list at the top right, with its own songs and setlists.'],
+      ['b', 'If you try to sign up again with the same email address, JJ\'s Setlist offers to sign you in instead, and adds the new band to your account.'],
+      ['b', 'Your name is the same in every band. Change it with Change my name in your account menu.'],
       ['h2', 'Your account menu'],
-      ['p', 'Click your email address (top right):'],
+      ['p', 'Click your name (top right):'],
+      ['b', 'Change my name - the name your bandmates see, in all your bands.'],
       ['b', 'Copy my own setlists into the band - shares setlists you made yourself with the band (yours stay as they are).'],
       ['b', 'Copy setlists from this computer - brings in setlists saved before you signed in, or in the setlists folder.'],
       ['b', 'Leave the band - you stop seeing its songs and setlists.'],
@@ -3010,9 +3086,11 @@ async function start() {
   if (cloud.notice) await messageBox(...cloud.notice);   // e.g. removed from a band - say so first
   if (welcome && mode === 'cloud') {
     messageBox(`Welcome to ${welcome}`, `You're now a member of ${welcome}, with full access to its song library and setlists.\n\n`
-      + 'Switch between the band and your own setlists with the list at the top right, next to your email address.');
+      + 'Switch between the band and your own setlists with the list at the top right, next to your name.');
   } else if (newAccount) {
     offerImport(true);
+  } else if (mode === 'cloud' && !cloud.user.displayName && !store.get('nameAsked', false, accountPrefix())) {
+    changeName(true);                         // signed up before names: ask once
   }
   // Google Drive copy: each time the app opens when it's the first choice,
   // or as the backup when no song database is loaded here.
