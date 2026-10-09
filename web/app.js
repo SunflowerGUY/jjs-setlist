@@ -1363,7 +1363,7 @@ async function adminCreateBand(bands, suggested = '') {
         ${note ? `<p class="drive-result bad">${esc(note)}</p>` : ''}
         <label for="bnName">Band name</label>
         <input id="bnName" type="text" maxlength="60" value="${esc(name)}" placeholder="e.g. Jelly Jazz">
-        <p class="small muted">An invitation code is made for it straight away, to send to the band's members.</p></div>`,
+        <p class="small muted">You'll be its first member. An invitation code is made for it straight away, to send to the other members.</p></div>`,
     [{ label: 'Cancel', value: false }, { label: 'Create Band', value: true, primary: true, check: () => !!$('#bnName').value.trim() }], true);
     $('#bnName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...$('#dialogButtons').children].pop().click(); } });
     $('#bnName').focus();
@@ -1379,11 +1379,14 @@ async function adminCreateBand(bands, suggested = '') {
     batch.set(db.collection('bands').doc(key), { name, key, inviteCode: code, created: now(), createdBy: cloud.user.uid });
     batch.set(db.collection('invites').doc(code), { bandId: key, bandName: name, created: now() });
     batch.set(cloudUserDoc().collection('bands').doc(key), { name, joined: now() });
+    // The creator is its first member (so they're on its member list, by name).
+    batch.set(db.collection('bands').doc(key).collection('members').doc(cloud.user.uid),
+      { email: cloud.user.email || '', name: cloud.user.displayName || '', code, joined: now() });
     await batch.commit();
     cloud.bands.push({ id: key, name });
     cloud.bands.sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
     renderSpacePicker();
-    return `Created ${name}. Its invitation code is ${code} - use “Copy invitation” to send it to the members.`;
+    return `Created ${name}, with you as its first member. Its invitation code is ${code} - use “Copy invitation” to send it to the other members.`;
   }
 }
 
