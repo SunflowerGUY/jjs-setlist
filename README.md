@@ -182,6 +182,28 @@ It runs on **Firebase** (Google's free service for this; the free plan easily co
 
 With `web/firebase-config.js` left as `null`, accounts are off and the app works exactly as before.
 
+### Where online data is kept
+
+Everything is in your Firebase project's **Firestore** database. Nothing is stored on GitHub, and on people's computers only as a working copy in the browser. A band's section is named after the band in lower case without spaces or punctuation, e.g. `jellyjazz` for *Jelly Jazz*.
+
+| What | Where in Firestore |
+|---|---|
+| A band (name, current invitation code) | `bands/<band>` |
+| The band's **song library** (songs and songsheet links) | `bands/<band>/data/library` |
+| The band's settings (Google Drive link, "Drive copy first") | `bands/<band>/data/settings` |
+| The band's **saved setlists**, one entry per setlist | `bands/<band>/setlists/<setlist name>` |
+| Who's in the band (name, email, date joined) | `bands/<band>/members/<account ID>` |
+| Each person's **own** setlists, song library and settings | `users/<account ID>/…` |
+| Which bands each person is in | `users/<account ID>/bands/<band>` |
+| Invitation codes (code → band) | `invites/<code>` |
+| "Request an invitation code" messages | `requests/…` |
+| Accounts that signed up with a code | `registered/<account ID>` |
+| The administrator(s) | `admins/<account ID>` |
+
+When a band uses **"Google Drive copy first"**, its songs really come from the Google Drive spreadsheet each time the app opens. `data/library` is then the backup copy used when Drive can't be reached, so change the songs in the spreadsheet. Logins (email, password, name) aren't in Firestore: they're under **Authentication ▸ Users** in the Firebase console.
+
+To look at the data: Firebase console ▸ your project ▸ **Firestore Database ▸ Data**. ⚠️ Edits and deletes there take effect at once for everyone and **can't be undone**. Use the app to change setlists and songs.
+
 **Testing without the real project:** `.firebase-test/Start Firebase Emulator.bat` runs a pretend Firebase on this PC (it needs Java, and installs the Firebase tools the first time). With the helper running, open `http://localhost:8765/?emulator`. Everything in the pretend Firebase disappears when its window closes. The made-up test accounts are in `.firebase-test/test-accounts.json`.
 
 ## How it works
