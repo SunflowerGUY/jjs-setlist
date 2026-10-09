@@ -339,6 +339,14 @@ ol.steps li { margin: 5px 0; }
 .badge { display: inline-block; min-width: 1.4em; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--missing); color: #fff; font-size: .8em; text-align: center; }
 .account-form .ac-head { margin: 4px 0 0; font-size: 1rem; }
 .account-form .ac-band { font-size: 1.05rem; background: #eef6ff; border: 1px solid #c9def7; border-radius: 6px; padding: 8px 12px; margin: 0 0 6px; }
+/* "Changed by Gary - reload?" bar, under the toolbar. */
+.change-notice {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; padding: 6px 10px;
+  background: #fff4d6; border: 1px solid #f0c36d; border-radius: 6px;
+}
+.change-notice[hidden] { display: none; }
+
 /* Signed out on the website: a plain white page with just the sign-in window. */
 body.gate { background: #fff; }
 body.gate #app { display: none; }
@@ -354,6 +362,8 @@ body.gate #dialogBody { max-height: none; }   /* nothing behind it: use the page
 .admin .band-code code { font-size: 1.05em; background: #f3f5f8; padding: 2px 6px; border-radius: 4px; letter-spacing: .04em; }
 .admin .member-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .admin .request-msg { white-space: pre-wrap; background: #f7f8fa; border-radius: 4px; padding: 4px 8px; margin: 4px 0; }
+.admin .request-note { background: #fff4d6; border: 1px solid #f0c36d; border-radius: 4px; padding: 4px 8px; margin: 4px 0; }
+.admin .request-note button { padding: 2px 8px; margin: 0 4px; }
 .copy-box { white-space: pre-wrap; background: #f3f5f8; padding: 10px; border-radius: 6px; user-select: all; }
 
 /* ---------- menu bar: orange with bold names, so it stands out */

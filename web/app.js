@@ -255,6 +255,7 @@ const state = {
   sets: normaliseSets([]),
   name: '',
   savedKey: '',
+  loadedSaved: '',                           // the saved setlist's "saved" stamp, as on screen
   setlistDb: '',
   dirty: false,
   active: 0,
@@ -275,6 +276,7 @@ function loadLocalState() {
     sets: normaliseSets(working?.sets),
     name: working?.name || '',
     savedKey: working?.savedKey || '',
+    loadedSaved: working?.loadedSaved || '',
     setlistDb: working?.setlistDb || '',
     dirty: !!working?.dirty,
     fontSize: settings.fontSize || DEFAULT_FONT,
@@ -395,6 +397,8 @@ function setlists() { return mode === 'browser' ? store.get('setlists', {}) : sa
 
 async function putSetlist(key, data) {
   if (mode === 'cloud') {
+    // Who saved it - for the other members' "changed by Gary" notices.
+    data = { ...data, saved_by: accountName(), saved_by_uid: cloud.user.uid };
     await cloudWrite(cloudRoot().collection('setlists').doc(key), data);
     savedSetlists[key] = data;
   } else if (mode === 'files') {
@@ -411,8 +415,15 @@ async function putSetlist(key, data) {
 
 async function removeSetlist(key) {
   if (mode === 'cloud') {
-    await cloudWrite(cloudRoot().collection('setlists').doc(key), null);
+    // Forget it first, so the live update of my own delete isn't reported as someone else's.
+    const kept = savedSetlists[key];
     delete savedSetlists[key];
+    try {
+      await cloudWrite(cloudRoot().collection('setlists').doc(key), null);
+    } catch (err) {
+      savedSetlists[key] = kept;
+      throw err;
+    }
   } else if (mode === 'files') {
     await api('DELETE', 'setlists/' + encodeURIComponent(key));
     delete savedSetlists[key];
@@ -422,6 +433,79 @@ async function removeSetlist(key) {
     store.set('setlists', all);
   }
 }
+
+// ---------------------------------------------------------------- live updates: "changed by Gary - reload?"
+// Signed in, the open space's setlists are watched. When someone else (another
+// member, or me on another computer) saves the setlist on screen, a bar under the
+// toolbar says so and offers to reload it. Other setlists get a line in the status bar.
+let stopWatching = null;
+function watchSetlists() {
+  stopWatching?.();
+  let first = true;
+  stopWatching = cloudRoot().collection('setlists').onSnapshot((snap) => {
+    if (first) { first = false; return; }      // what's there already
+    snap.docChanges().forEach((ch) => {
+      if (ch.doc.metadata.hasPendingWrites) return;          // my own save, on its way up
+      const key = ch.doc.id;
+      if (ch.type === 'removed') {
+        if (!(key in savedSetlists)) return;
+        delete savedSetlists[key];
+        setlistGone(key);
+      } else {
+        const data = ch.doc.data();
+        if (!Array.isArray(data.sets)) return;
+        savedSetlists[key] = data;
+        setlistChanged(key, data);
+      }
+    });
+    renderSaved();
+  }, () => { /* removed from the band, or signed out: the next reload sorts it out */ });
+}
+
+/** "by Gary", "on another computer" - who saved this version. */
+function changedBy(data) {
+  if (data.saved_by_uid && data.saved_by_uid === cloud.user?.uid) return 'on another computer (or tab)';
+  return data.saved_by ? `by ${data.saved_by}` : 'by someone else';
+}
+
+function setlistChanged(key, data) {
+  const name = data.name || key;
+  if (key !== state.savedKey) { status(`“${name}” was just saved ${changedBy(data)}.`); return; }
+  if (data.saved && data.saved === state.loadedSaved) return;   // the version on screen
+  const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  showChangeNotice(`“${name}” was changed ${changedBy(data)} at ${time}.`
+    + (state.dirty ? ' Reloading replaces your unsaved changes with that version.' : ''), [
+    { label: 'Reload', primary: true, action: () => loadSetlistData(savedSetlists[key] || data, key) },
+    { label: 'Not Now', action: () => {} },  // saving later still asks before replacing theirs
+  ]);
+}
+
+function setlistGone(key) {
+  const where = cloud.band ? ` from ${cloud.band.name}` : '';
+  if (key !== state.savedKey) { status(`The saved setlist “${key}” was just deleted${where}.`); return; }
+  state.loadedSaved = '';
+  saveWorking();
+  showChangeNotice(`The saved setlist “${state.name || key}” was just deleted${where}. It's still on screen: Save Setlist to keep it.`,
+    [{ label: 'OK', action: () => {} }]);
+}
+
+/** The bar under the toolbar, with buttons; any button closes it. */
+function showChangeNotice(text, buttons) {
+  $('#changeText').textContent = text;
+  const box = $('#changeButtons');
+  box.innerHTML = '';
+  for (const b of buttons) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = b.label;
+    if (b.primary) btn.className = 'primary';
+    btn.addEventListener('click', () => { hideChangeNotice(); b.action(); });
+    box.appendChild(btn);
+  }
+  $('#changeNotice').hidden = false;
+}
+
+function hideChangeNotice() { $('#changeNotice').hidden = true; }
 
 function whereSaved() {
   return { cloud: `in ${spaceName()}`, files: 'in the setlists folder', browser: 'in this browser' }[mode];
@@ -448,7 +532,7 @@ function renderStorage() {
 
 function saveWorking() {
   store.set('working', {
-    sets: state.sets, name: state.name, savedKey: state.savedKey,
+    sets: state.sets, name: state.name, savedKey: state.savedKey, loadedSaved: state.loadedSaved,
     setlistDb: state.setlistDb, dirty: state.dirty,
   });
 }
@@ -1272,8 +1356,8 @@ async function setBandCode(band, code) {
   return code ? `${band.name}'s new invitation code is ${code}.` : `${band.name}'s invitation code has been revoked.`;
 }
 
-async function adminCreateBand(bands) {
-  let name = '', note = '';
+async function adminCreateBand(bands, suggested = '') {
+  let name = String(suggested || '').trim().replace(/\s+/g, ' '), note = '';
   for (;;) {
     const p = dialog('Create a band', `<div class="account-form">
         ${note ? `<p class="drive-result bad">${esc(note)}</p>` : ''}
@@ -1327,13 +1411,14 @@ async function adminMembers(band) {
 /** Invitation requests: reply by email with a band's code, or delete. */
 async function adminRequests() {
   for (;;) {
-    let requests = [], bands = [];
+    let requests = [], allBands = [], bands = [];
     try {
       const [rq, bd] = await Promise.all([cloud.db.collection('requests').get(), cloud.db.collection('bands').get()]);
       requests = rq.docs.map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (b.created?.seconds || 0) - (a.created?.seconds || 0));
-      bands = bd.docs.map((d) => ({ id: d.id, ...d.data() })).filter((b) => b.inviteCode)
+      allBands = bd.docs.map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+      bands = allBands.filter((b) => b.inviteCode);               // the ones with a code to send
     } catch (err) {
       messageBox('Invitation requests', cloudMessage(err));
       return;
@@ -1341,25 +1426,44 @@ async function adminRequests() {
     cloud.requests = requests.length;
     renderAccount();
     const when = (r) => (r.created?.toDate ? dateTimeText(r.created.toDate().toISOString()) : '');
-    const options = bands.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-    const rows = requests.map((r) => `<div class="band-row request-row">
+    // The band they asked for: the same name (apart from spaces, capitals, punctuation), or one very like it.
+    const asked = (r) => {
+      const key = bandKey(r.band);
+      if (!key) return { band: null, close: false };
+      const same = allBands.find((b) => (b.key || bandKey(b.name)) === key);
+      if (same) return { band: same, close: false };
+      const near = allBands.find((b) => spellingSimilarity(key, b.key || bandKey(b.name)) >= 0.8);
+      return { band: near || null, close: !!near };
+    };
+    const rows = requests.map((r) => {
+      const { band, close } = asked(r);
+      const pick = band?.inviteCode ? band.id : '';
+      const options = `<option value=""${pick ? '' : ' selected'}>Choose a band…</option>`
+        + bands.map((b) => `<option value="${esc(b.id)}"${b.id === pick ? ' selected' : ''}>${esc(b.name)}</option>`).join('');
+      let note = '';
+      if (r.band && !band) {
+        note = `No band called “${esc(r.band)}” yet.
+          <button type="button" data-act="create" data-id="${esc(r.id)}">Create “${esc(r.band)}”…</button>
+          Or choose another band to send its code.`;
+      } else if (band && !band.inviteCode) {
+        note = `${esc(band.name)} has no invitation code at the moment - make one in Bands & invitation codes.`;
+      } else if (close) {
+        note = `They typed “${esc(r.band)}”: ${esc(band.name)} is chosen as the closest. Check it's the right band.`;
+      }
+      return `<div class="band-row request-row">
         <div><b>${esc(r.name)}</b> &lt;${esc(r.email)}&gt; <span class="muted small">· ${esc(when(r))}</span></div>
         ${r.band ? `<div class="small">Band: ${esc(r.band)}</div>` : ''}
         ${r.message ? `<div class="small request-msg">${esc(r.message)}</div>` : ''}
+        ${note ? `<div class="small request-note">${note}</div>` : ''}
         <div class="band-code">${bands.length ? `<select data-for="${esc(r.id)}">${options}</select>
           <button type="button" data-act="email" data-id="${esc(r.id)}">Email them the code…</button>`
           : '<span class="muted small">Make a band code first (Bands & invitation codes).</span>'}
           <button type="button" data-act="delete" data-id="${esc(r.id)}">Delete request</button></div>
-      </div>`).join('') || '<p class="muted">No requests waiting.</p>';
+      </div>`;
+    }).join('') || '<p class="muted">No requests waiting.</p>';
     const p = dialog('Invitation requests', `<div class="admin">${rows}
         <p class="small muted">“Email them the code” opens an email to them in your email program, with the band's invitation code and steps filled in. Check who they are before sending.</p></div>`,
     [{ label: 'Close', value: false, primary: true }], true);
-    // Suggest the band they asked for.
-    requests.forEach((r) => {
-      const sel = $('#dialogBody').querySelector(`select[data-for="${CSS.escape(r.id)}"]`);
-      const match = sel && bands.find((b) => bandKey(b.name) === bandKey(r.band));
-      if (match) sel.value = match.id;
-    });
     $('#dialogBody').querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', () => dialogFinish({
       act: btn.dataset.act, id: btn.dataset.id,
       band: $('#dialogBody').querySelector(`select[data-for="${CSS.escape(btn.dataset.id)}"]`)?.value,
@@ -1368,8 +1472,16 @@ async function adminRequests() {
     if (!ans) return;
     const r = requests.find((x) => x.id === ans.id);
     try {
-      if (ans.act === 'email') {
+      if (ans.act === 'create') {
+        if (await adminCreateBand(allBands, r.band)) {
+          await messageBox('Invitation requests', `The band has been created, with its own invitation code.\n\nIt's now chosen for ${r.name}: click “Email them the code…” to send it.`);
+        }
+      } else if (ans.act === 'email') {
         const band = bands.find((b) => b.id === ans.band);
+        if (!band) {
+          await messageBox('Invitation requests', `Choose which band's invitation code to send to ${r.name} first.`);
+          continue;
+        }
         const subject = `Your invitation to ${band.name} on JJ's Setlist`;
         window.location.href = `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteText(band.name, band.inviteCode, r.name))}`;
         if (await confirmBox('Invitation requests', `An email to ${r.email} should now be open in your email program.\n\nOnce it's sent, delete this request?`, 'Delete Request')) {
@@ -2194,13 +2306,25 @@ async function save() {
       && !await confirmBox('Overwrite?', `A setlist called “${key}” already exists.\nReplace it?`, 'Replace')) {
     return false;
   }
+  // Someone else saved it since it was opened here: don't silently replace their version.
+  const theirs = all[key];
+  if (mode === 'cloud' && theirs && state.savedKey === key && state.loadedSaved && theirs.saved
+      && theirs.saved !== state.loadedSaved
+      && !await confirmBox('Changed since you opened it',
+        `“${theirs.name || key}” was changed ${changedBy(theirs)} since you opened it here.\n\n`
+        + 'Replace that version with yours?\n\n(To see their changes first: Cancel, Export This Setlist to keep yours, then Load it again.)', 'Replace')) {
+    return false;
+  }
+  const data = setlistData();
   try {
-    await putSetlist(key, setlistData());
+    await putSetlist(key, data);
   } catch (err) {
     await messageBox('Could not save setlist', `${err.message}\n\nUse File ▸ Export This Setlist (.json) to keep a copy.`);
     return false;
   }
+  hideChangeNotice();
   state.savedKey = key;
+  state.loadedSaved = data.saved;
   state.dirty = false;
   state.setlistDb = state.dbName;
   saveWorking();
@@ -2256,10 +2380,12 @@ async function loadSetlistData(data, key) {
       [{ label: 'Cancel', value: false }, { label: 'Load Anyway', value: true, primary: true }]);
     if (!ok) { renderSaved(); return; }
   }
+  hideChangeNotice();
   state.sets = sets.map((st) => st.map(latestDetails));
   state.setlistDb = savedDb;
   state.name = data.name || key;
   state.savedKey = key;
+  state.loadedSaved = data.saved || '';
   state.dirty = false;
   state.sel = { list: 'lib', index: -1 };
   $('#setName').value = state.name;
@@ -2291,9 +2417,11 @@ async function deleteSaved() {
 
 async function newSetlist() {
   if (!await confirmDiscard()) return;
+  hideChangeNotice();
   state.sets = normaliseSets([]);
   state.name = '';
   state.savedKey = '';
+  state.loadedSaved = '';
   state.setlistDb = '';
   state.dirty = false;
   state.sel = { list: 'lib', index: -1 };
@@ -2660,6 +2788,7 @@ const GUIDES = {
       ['b', 'No code yet? Click Request an invitation code on the Sign in window, and send your name and email address. The administrator will be in touch.'],
       ['h2', 'Your band, and your own setlists'],
       ['b', 'In a band, its members share one song library and one set of saved setlists. Everyone has full access: anything a member saves, the others see.'],
+      ['b', 'If another member saves the setlist you have open, a yellow bar under the toolbar says who changed it, with Reload to see their version. If you save over it anyway, you\'re asked first, so nobody\'s changes are replaced by accident.'],
       ['b', 'You also have your own private setlists. Switch between them and your band(s) with the list at the top right, next to your name.'],
       ['b', 'The label next to the song total shows which is open, e.g. ☁ Saving to Jelly Jazz, or ☁ Saving to your account.'],
       ['b', 'Colours and text size are always your own; a band\'s Google Drive link (File ▸ Song Database Settings) is shared by its members.'],
@@ -3080,6 +3209,7 @@ async function start() {
       newAccount = await loadCloudData();
       mode = 'cloud';
       document.body.classList.remove('gate');
+      watchSetlists();
     } catch (err) {
       console.error(err);
       store.prefix = BASE_PREFIX;
