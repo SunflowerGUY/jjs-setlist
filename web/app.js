@@ -1637,12 +1637,22 @@ function renderLibrary() {
   let text = 'No song database loaded';
   if (state.library.length) {
     text = `${state.dbName}  (${plural(state.library.length, 'song')}, ${plural(links, 'songsheet')})`;
-    if (state.dbBackup) text = `⚠ BACKUP: ${text}  ·  copy from ${dateTimeText(state.dbLoaded)}`;
-    else if (state.dbSource === 'drive') text += `  ·  Google Drive, ${dateTimeText(state.dbLoaded)}`;
+    if (state.dbBackup) text = `⚠ BACKUP: ${text}  ·  copy from ${shortDateTime(state.dbLoaded)}`;
+    else if (state.dbSource === 'drive') text += `  ·  Google Drive, ${shortDateTime(state.dbLoaded)}`;
   }
   label.textContent = text;
   label.classList.toggle('backup', !!state.dbBackup);
   label.title = state.dbBackup || text;
+}
+
+/** "09 Oct 18:48" (with the year only if it isn't this year), kept on one line - for the song database label. */
+function shortDateTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return 'earlier';
+  const text = d.getFullYear() === new Date().getFullYear()
+    ? d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).replace(',', '')
+    : dateTimeText(iso);
+  return text.replace(/ /g, ' ');        // no line break inside the date
 }
 
 function dateTimeText(iso) {
