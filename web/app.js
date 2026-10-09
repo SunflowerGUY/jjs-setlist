@@ -1191,10 +1191,9 @@ async function pendingRequests() {
 function inviteText(bandName, code, name = '') {
   return `Hi${name ? ` ${name}` : ''},\n\nHere's your invitation to join ${bandName} on JJ's Setlist:\n\n`
     + `    Invitation code:  ${code}\n\n`
-    + `1. Open ${SITE_URL}\n`
-    + '2. Click "Sign in" (top right).\n'
-    + '3. Under "New here?", type the invitation code, then click "Sign up with this code".\n'
-    + '4. Type your name, and choose your email address and a password (or use Google).\n\n'
+    + `1. Open ${SITE_URL} - it opens on the sign-in window.\n`
+    + '2. Under "New here?", type the invitation code, then click "Sign up with this code".\n'
+    + '3. Type your name, and choose your email address and a password (or use Google).\n\n'
     + `You'll then see ${bandName}'s songs and setlists. The confirmation email may land in your spam folder.\n\n`
     + 'Already using JJ\'s Setlist with another band? Don\'t make a new account. Sign in as usual, then click your name '
     + '(top right) > "Join a band with an invitation code" and type the code above. One account covers all your bands.\n';
@@ -2654,7 +2653,7 @@ const GUIDES = {
       ['p', 'Sign in and your song library, settings and setlists are kept online - there on any computer. If you\'re in a band, you also share the band\'s song library and setlists with its other members.'],
       ['h2', 'Joining (signing up)'],
       ['p', 'JJ\'s Setlist is by invitation: you need an invitation code from the administrator. The code also says which band you\'re joining.'],
-      ['n', '1.  Click Sign in (top right). Under “New here?”, type the invitation code - it shows which band it\'s for.'],
+      ['n', '1.  On the website, the sign-in window opens by itself (on your own computer, click Sign in, top right). Under “New here?”, type the invitation code - it shows which band it\'s for.'],
       ['n', '2.  Click Sign up with this code.'],
       ['n', '3.  Type your name (what your bandmates will see, e.g. Gary), your email address - any address works, it doesn\'t have to be Gmail - and a password of at least 8 characters. Or click Sign up with Google.'],
       ['n', '4.  Click Create My Account. A message is sent to check your address: open it and click its link (look in the spam folder if it doesn\'t arrive).'],
