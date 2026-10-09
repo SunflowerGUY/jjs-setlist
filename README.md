@@ -18,7 +18,7 @@
 
 ![JJ's Setlist in the browser](docs/web-main.png)
 
-> **Use it online** at the link above: nothing to install. Your setlists are kept in your browser; use *File ▸ Export* to keep copies.
+> **Use it online** at the link above: nothing to install. It's for members (by invitation): sign in, and your setlists are kept in your account, or shared with your band.
 > **Or download it** to keep settings and setlists as files on your own computer (see *Getting started*).
 > The original desktop app (Windows, macOS, Linux) lives at [SunflowerGUY/JJ-s-Musicans-Setlist-Organiser](https://github.com/SunflowerGUY/JJ-s-Musicans-Setlist-Organiser).
 
@@ -37,6 +37,8 @@
 - **Export** a setlist as text or CSV, and the song database as CSV with the web links written out.
 - **Adjustable text size and colours**: *View ▸ Songlist & Setlist Colours* gives a live preview and a readability (contrast) check.
 - **Online accounts** (needed on the website; optional for the copy on your own computer): each person signs in with **any email address and a password** (no Gmail needed), or with Google, and gets their own song library, settings and setlists, kept separate from everyone else's. Works from any computer. *(Needs a free Firebase project. See **Online accounts** below.)*
+- **Bands**: a band's members share one song library and one set of setlists. **One account covers all your bands**: someone in two bands switches between them with the list at the top right. Each person has **one name** (e.g. *Gary*), shown to their bandmates instead of their email address.
+- **"Changed by Gary - reload?"**: if another member saves the setlist you have open, a yellow bar says who changed it, with **Reload** to see their version. Saving over it asks first, so nobody's changes are replaced by accident.
 - **Saves to real files** when started with `Start JJ's Setlist.bat`: settings go in `config.json` and setlists in the `setlists` folder, the same files the desktop app uses. The song library and the setlist on screen are also remembered, so a reload or closed tab loses nothing.
 - **Template generators**: *Help ▸ Create Template Spreadsheet…* (or *…CSV…*) makes a ready-to-fill song list with the right headings and example rows, then shows the next steps. With the helper running, it's saved in the project folder and **Open it in Excel** opens it for you.
 - **Built-in help** (*Help* menu, or F1): the basics, keyboard shortcuts, full guides to setting up your song spreadsheet or CSV file, and your online account.
@@ -155,13 +157,19 @@ Setlists kept in the browser only can be moved with *File ▸ Export This Setlis
 
 ## Online accounts
 
-Optional. Turn them on and people sign in with **any email address and a password**, or with Google, from the **account button** at the top right. Signing out clears that person's copy from the browser.
+Turn them on and people sign in with **any email address and a password**, or with Google. Signing out clears that person's copy from the browser.
 
-**By invitation, with bands.** Signing up needs an **invitation code** from the administrator, and the code also says which **band** the person joins. On the Sign in window, new people type the code under *New here?*. It shows the band's name. Then they choose an email and password. People without a code can **Request an invitation code** (name and email), which the administrator sees and answers by hand.
+**On the website, signing in is required.** Signed out (or after signing out), the website is a plain white page with just the sign-in window; nothing else can be used. The copy on your own computer (started with the launcher, or `index.html`) still works without signing in, from the **Sign in** button at the top right.
 
+**By invitation, with bands.** Signing up needs an **invitation code** from the administrator, and the code also says which **band** the person joins. On the sign-in window, new people type the code under *New here?*. It shows the band's name. Then they type **their name** (what their bandmates see) and choose an email and password, or use Google. People without a code can **Request an invitation code** (name and email), which the administrator sees and answers by hand.
+
+- **One account per person, for all their bands.** Given a code for another band, a member signs in as usual and uses *Join a band with an invitation code* in the account menu. If they try to sign up again with the same email address, the app offers sign-in instead and adds the new band.
+- **Names:** each person has one name, shown on their account button and in every band's member list instead of their email address. *Change my name* is in the account menu. Accounts made before names existed are asked for one once.
 - **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours and text size stay personal; a band's Google Drive link is shared.
-- **The administrator** (account menu ▸ *Bands & invitation codes*) creates bands (names that are the same apart from spaces, capitals or punctuation, like *Jelly Jazz* / *The Jelly-Jazz*, are caught), copies a band's invitation to send, **revokes** the code once everyone has joined (members keep access), makes new codes, and removes members. *Invitation requests* lists who has asked, with a button to email them the band's invitation.
-- **Nobody can see anything they shouldn't:** the database rules (`firestore.rules`) give a login made without a code no access at all, keep each person's own setlists private, let only a band's members into the band, and let only the administrator manage bands, codes and requests.
+- **Live notices:** the open band's setlists are watched. If someone saves the setlist you have open, a yellow bar under the toolbar says who (*"The Local Pub" was changed by Gary at 7:42 pm*), with **Reload** / **Not Now**. Saving over a version changed since you opened it asks first. Changes to other setlists get a line in the status bar. Each setlist saved online records who saved it.
+- **The administrator** (account menu ▸ *Bands & invitation codes*) creates bands (names that are the same apart from spaces, capitals or punctuation, like *Jelly Jazz* / *The Jelly-Jazz*, are caught), copies a band's invitation to send, **revokes** the code once everyone has joined (members keep access), makes new codes, and sees members by name or removes them.
+- **Invitation requests** (account menu; a number on the account button shows how many are waiting) lists who has asked, with a button to email them a band's invitation from your own email program. **No email is sent automatically**: Firebase's free plan can't send email, so check the list when you sign in. The band they asked for is chosen only when it matches one of yours (a close spelling is chosen with a note to check it). Otherwise it says *Choose a band…* and offers to create the band, so the wrong band's code isn't sent by accident.
+- **Nobody can see anything they shouldn't:** the database rules (`firestore.rules`) give a login made without a code no access at all, keep each person's own setlists private, let only a band's members into the band, let members change only their own name in a band's member list, and let only the administrator manage bands, codes and requests. After changing `firestore.rules`, paste it into **Firestore Database ▸ Rules** in the Firebase console and **Publish**.
 
 It runs on **Firebase** (Google's free service for this; the free plan easily covers a group of friends). To set it up, once:
 
