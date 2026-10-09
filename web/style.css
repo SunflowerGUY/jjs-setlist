@@ -94,6 +94,8 @@ kbd:empty { display: none; }
 /* ---------- toolbar */
 .toolbar { padding: 8px 10px 0; display: grid; gap: 6px; }
 .toolbar .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Bold top area: the toolbar rows, the band list and the account button (the menu names are bold already). */
+.toolbar .row, #spacePicker, #account { font-weight: 700; }
 #setName { width: 300px; max-width: 100%; }
 #saved { width: 260px; max-width: 100%; }
 
