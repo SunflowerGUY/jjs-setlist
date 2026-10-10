@@ -704,7 +704,9 @@ async function loadCloudData() {
   if (admin) pendingRequests().then((n) => { cloud.requests = n; renderAccount(); });
 
   // The space chosen last time on this computer - if I'm still in that band.
-  const wanted = store.get('space', '', accountPrefix());
+  // None chosen yet (e.g. just signed in): open the band, not "My own setlists".
+  const saved = store.get('space', null, accountPrefix());
+  const wanted = saved === null ? (cloud.bands[0]?.id || '') : saved;
   cloud.band = cloud.bands.find((b) => b.id === wanted) || null;
   if (cloud.band) {
     try {
@@ -961,6 +963,7 @@ async function signIn(view = 'signin', message = '', email = '', invite = null, 
           <input id="acEmail" type="email" autocomplete="username" spellcheck="false" value="${esc(email)}">
           <label for="acPassword">Password</label>
           <input id="acPassword" type="password" autocomplete="current-password">
+          <button type="button" class="primary ac-signin" id="acSignIn">Sign in as a Registered User</button>
           <p class="small"><button type="button" class="link-button" id="acForgot">Forgot password?</button></p>
           <button type="button" class="google-btn" id="acGoogle"><b>G</b>  Sign in with Google</button>
           <div class="or"><span>New here?</span></div>
@@ -972,13 +975,8 @@ async function signIn(view = 'signin', message = '', email = '', invite = null, 
             sign in above, then click your name (top right) ▸ Join a band with an invitation code.</p>
           <p class="small muted">No code? <button type="button" class="link-button" id="acRequest">Request an invitation code</button></p>
         </div>`,
-        buttons: [{ label: 'Cancel', value: false }, { label: 'Sign In', value: 'go', primary: true, check: () => {
-          const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
-          if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return false; }
-          if (!pw) { showMsg('Please type your password.'); $('#acPassword').focus(); return false; }
-          fields = { email: e, password: pw };
-          return true;
-        } }],
+        // The sign-in button sits under the password box (wired up below), so only Cancel here.
+        buttons: [{ label: 'Cancel', value: false }],
       },
       signup: {
         title: `Join ${invite?.bandName || 'a band'} on JJ's Setlist`,
@@ -1044,8 +1042,16 @@ async function signIn(view = 'signin', message = '', email = '', invite = null, 
       if (e.key !== 'Enter') return;
       e.preventDefault();
       if (inp.id === 'acCode') { if (!$('#acSignUp').disabled) $('#acSignUp').click(); return; }
-      [...$('#dialogButtons').children].find((b) => b.classList.contains('primary')).click();
+      if (view === 'signin') { $('#acSignIn').click(); return; }
+      [...$('#dialogButtons').children].find((b) => b.classList.contains('primary'))?.click();
     }));
+    $('#acSignIn')?.addEventListener('click', () => {
+      const e = $('#acEmail').value.trim(), pw = $('#acPassword').value;
+      if (!e) { showMsg('Please type your email address.'); $('#acEmail').focus(); return; }
+      if (!pw) { showMsg('Please type your password.'); $('#acPassword').focus(); return; }
+      fields = { email: e, password: pw };
+      dialogFinish('go');
+    });
     $('#acGoogle')?.addEventListener('click', () => { if ($('#acName')) name = tidyName($('#acName').value); dialogFinish('google'); });
     $('#acForgot')?.addEventListener('click', () => { fields = { email: $('#acEmail').value.trim() }; dialogFinish('forgot'); });
     $('#acRequest')?.addEventListener('click', () => { email = $('#acEmail')?.value.trim() || email; dialogFinish('to-request'); });
@@ -1132,6 +1138,9 @@ async function signIn(view = 'signin', message = '', email = '', invite = null, 
       if (joinAfter && await lookUpCode(joinAfter.code)) {
         const already = await cloud.db.collection('users').doc(result.user.uid).collection('bands').doc(joinAfter.bandId).get();
         if (!already.exists) await joinBand(result.user, joinAfter);
+      } else {
+        // Open the band's setlists after signing in, not whatever was open last time.
+        try { localStorage.removeItem(accountPrefix(result.user.uid) + 'space'); } catch { /* no storage */ }
       }
       status('Signed in - opening your account…');
       location.reload();

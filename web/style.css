@@ -379,3 +379,6 @@ body.gate #dialogBody { max-height: none; }   /* nothing behind it: use the page
 .menubar { background: #ffc874; border-bottom-color: #e8a94a; }
 .menu-title { font-weight: 700; color: #1d232a; }
 .menu.open .menu-title, .menu-title:hover { background: #f5b04a; }
+
+/* sign-in window: the main button sits right under the password box */
+.account-form .ac-signin { margin-top: 10px; padding: 9px 12px; font-weight: 700; }
