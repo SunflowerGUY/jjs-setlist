@@ -1745,11 +1745,16 @@ function insertSong(n, index, song) {
     renderAll();
     return false;
   }
-  const where = state.sets.map((st, i) => (st.some((s) => songId(s) === songId(song)) ? `Set ${i + 1}` : null))
-    .filter(Boolean);
+  // A song is only performed once a night: refuse a second copy.
+  const where = state.sets.findIndex((st) => st.some((s) => songId(s) === songId(song)));
+  if (where >= 0) {
+    status(`“${song.title}” is already in Set ${where + 1}.`);
+    renderAll();
+    return false;
+  }
   state.sets[n].splice(index, 0, { ...song });
   changed(n, index);
-  status(`Added “${song.title}” to Set ${n + 1}.` + (where.length ? `  (Note: also in ${where.join(', ')})` : ''));
+  status(`Added “${song.title}” to Set ${n + 1}.`);
   return true;
 }
 
@@ -1974,13 +1979,15 @@ async function replaceSong(n, i) {
   if (!await p) return;
   const song = shown[chosen];
   if (!song || state.sets[n][i] !== old) return;   // the set changed meanwhile
-  const where = state.sets.map((st, k) => (st.some((s, j) => (k !== n || j !== i) && songId(s) === songId(song)) ? `Set ${k + 1}` : null))
-    .filter(Boolean);
+  const where = state.sets.findIndex((st, k) => st.some((s, j) => (k !== n || j !== i) && songId(s) === songId(song)));
+  if (where >= 0) {
+    status(`“${song.title}” is already in Set ${where + 1}, so it wasn't swapped in.`);
+    return;
+  }
   state.sets[n][i] = { ...song };
   changed(n, i);
   setActive(n);
-  status(`Replaced “${old.title}” with “${song.title}” in Set ${n + 1}.`
-    + (where.length ? `  (Note: also in ${where.join(', ')})` : ''));
+  status(`Replaced “${old.title}” with “${song.title}” in Set ${n + 1}.`);
 }
 
 // ---------------------------------------------------------------- drag and drop
