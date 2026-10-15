@@ -167,7 +167,7 @@ Turn them on and people sign in with **any email address and a password**, or wi
 
 - **One account per person, for all their bands.** Given a code for another band, a member signs in as usual and uses *Join a band with an invitation code* in the account menu. If they try to sign up again with the same email address, the app offers sign-in instead and adds the new band.
 - **Names:** each person has one name, shown on their account button and in every band's member list instead of their email address. *Change my name* is in the account menu. Accounts made before names existed are asked for one once.
-- **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours and text size stay personal; a band's Google Drive link is shared.
+- **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours, text size and the Google Drive link stay personal: your Drive link is never shared with the band.
 - **Live notices:** the open band's setlists are watched. If someone saves the setlist you have open, a yellow bar under the toolbar says who (*"The Local Pub" was changed by Gary at 7:42 pm*), with **Reload** / **Not Now**. Saving over a version changed since you opened it asks first. Changes to other setlists get a line in the status bar. Each setlist saved online records who saved it.
 - **The administrator** (account menu ▸ *Bands & invitation codes*) creates bands, becoming each new band's first member (names that are the same apart from spaces, capitals or punctuation, like *Jelly Jazz* / *The Jelly-Jazz*, are caught), copies a band's invitation to send, **revokes** the code once everyone has joined (members keep access), makes new codes, and sees members by name or removes them.
 - **Invitation requests** (account menu; a number on the account button shows how many are waiting) lists who has asked, with a button to email them a band's invitation from your own email program. **No email is sent automatically**: Firebase's free plan can't send email, so check the list when you sign in. The band they asked for is chosen only when it matches one of yours (a close spelling is chosen with a note to check it). Otherwise it says *Choose a band…* and offers to create the band, so the wrong band's code isn't sent by accident.
@@ -192,7 +192,6 @@ Everything is in your Firebase project's **Firestore** database. Nothing is stor
 |---|---|
 | A band (name, current invitation code) | `bands/<band>` |
 | The band's **song library** (songs and songsheet links) | `bands/<band>/data/library` |
-| The band's settings (Google Drive link, "Drive copy first") | `bands/<band>/data/settings` |
 | The band's **saved setlists**, one entry per setlist | `bands/<band>/setlists/<setlist name>` |
 | Who's in the band (name, email, date joined) | `bands/<band>/members/<account ID>` |
 | Each person's **own** setlists, song library and settings | `users/<account ID>/…` |

@@ -541,12 +541,10 @@ function saveSettings() {
   store.set('settings', { fontSize: state.fontSize, colours: state.colours,
     driveUrl: state.driveUrl, driveFirst: state.driveFirst });
   if (mode === 'cloud') {
-    // Colours and text size are always mine; the Google Drive link belongs to the open space.
-    const mine = { library_colours: state.colours, web_font_size: state.fontSize };
-    const drive = { backup_url: state.driveUrl || null, drive_first: state.driveFirst };
+    // All of these are mine, the Google Drive link too: it's never kept in a band,
+    // where the other members would see it.
     const failed = (err) => messageBox('Could not save settings', `The settings couldn't be saved:\n\n${err.message}`);
-    cloudWrite(cloudUserDoc().collection('data').doc('settings'), cloud.band ? mine : { ...mine, ...drive }, { merge: true }).catch(failed);
-    if (cloud.band) cloudWrite(cloudRoot().collection('data').doc('settings'), drive, { merge: true }).catch(failed);
+    cloudWrite(cloudUserDoc().collection('data').doc('settings'), settingsData(), { merge: true }).catch(failed);
   } else if (mode === 'files') {
     api('PUT', 'config', settingsData())
       .catch((err) => messageBox('Could not save settings', `config.json couldn't be saved:\n\n${err.message}`));
@@ -724,19 +722,21 @@ async function loadCloudData() {
   loadLocalState();                          // the unsaved setlist on screen, kept per account and space
 
   const root = cloudRoot();
-  const [mySettings, spaceSettings, libraryDoc, lists] = await Promise.all([
+  const [mySettings, bandSettings, libraryDoc, lists] = await Promise.all([
     cloudUserDoc().collection('data').doc('settings').get(),
-    root.collection('data').doc('settings').get(),
+    cloud.band ? root.collection('data').doc('settings').get() : null,
     root.collection('data').doc('library').get(),
     cloudSetlists(root),
   ]);
   savedSetlists = lists;
-  // Colours and text size are always mine; the Google Drive link belongs to the space.
+  // Colours, text size and the Google Drive link are always mine, in every space.
   const mine2 = mySettings.exists ? mySettings.data() : {};
-  const space = spaceSettings.exists ? spaceSettings.data() : {};
-  applyConfig({ library_colours: mine2.library_colours, web_font_size: mine2.web_font_size,
-    ...('backup_url' in space ? { backup_url: space.backup_url } : {}),
-    ...('drive_first' in space ? { drive_first: space.drive_first } : {}) });
+  applyConfig(SETTINGS_KEYS.reduce((c, k) => (k in mine2 ? { ...c, [k]: mine2[k] } : c), {}));
+  // Earlier versions kept a Google Drive link in the band, where every member saw it: take it out.
+  if (bandSettings?.exists && Object.keys(bandSettings.data()).some((k) => k === 'backup_url' || k === 'drive_first')) {
+    const gone = firebase.firestore.FieldValue.delete();
+    root.collection('data').doc('settings').update({ backup_url: gone, drive_first: gone }).catch(() => {});
+  }
   useLibraryData(libraryDoc.exists ? libraryDoc.data() : null);
   // A brand-new personal space (nothing saved yet).
   return !cloud.band && !mySettings.exists && !libraryDoc.exists && !Object.keys(lists).length;
@@ -1523,9 +1523,11 @@ async function localDataForImport() {
   if (!from) {
     lists = store.get('setlists', {}, BASE_PREFIX);
     const s = store.get('settings', null, BASE_PREFIX);
-    settings = s && { library_colours: s.colours, web_font_size: s.fontSize, backup_url: s.driveUrl || null, drive_first: s.driveFirst };
+    settings = s && { library_colours: s.colours, web_font_size: s.fontSize };
     from = 'this browser';
   }
+  // Never the Google Drive link: the new account may be someone else's, set up on this computer.
+  if (settings) settings = { library_colours: settings.library_colours, web_font_size: settings.web_font_size };
   const library = store.get('library', null, BASE_PREFIX);
   return { lists, settings, library: library?.songs?.length ? library : null, from };
 }
@@ -1540,7 +1542,7 @@ async function offerImport(newAccount) {
   const takeLibrary = library && !state.library.length;
   if (takeLibrary) bring.push(`the song library “${library.name}” (${plural(library.songs.length, 'song')})`);
   const takeSettings = newAccount && settings;
-  if (takeSettings) bring.push('your colours, text size and Google Drive link');
+  if (takeSettings) bring.push('your colours and text size');
   if (!bring.length) {
     if (newAccount) {
       saveSettings();                          // marks the account as set up
