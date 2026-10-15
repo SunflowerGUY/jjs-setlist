@@ -79,7 +79,7 @@ This is a **desktop** tool for planning gigs, made for a computer screen with a 
    - **The Google Drive copy first**: the latest version is loaded each time the app opens. If Google Drive can't be reached (e.g. no internet), the copy kept in the browser is used and marked **⚠ BACKUP** in orange.
    - **The spreadsheet I open on this computer**: Drive is used only when no song database is loaded, or when you choose *File ▸ Load Song Database from Google Drive*.
 
-The label beside **Open Song Database…** shows which song list is in use and when the Drive copy was loaded, e.g. *JELLY JAZZ SETLIST (215 songs, 215 songsheets) · Google Drive, 09 Oct 18:48*. It's in a narrow font so it fits, and wraps onto a second line on a narrow window. Hover over it for the full text.
+The label beside **Open Song Database…** shows which song list is in use and when the Drive copy was loaded, e.g. *JELLY JAZZ Database (215 songs, 215 songsheets) · Google Drive, 09 Oct 18:48*. It's in a narrow font so it fits, and wraps onto a second line on a narrow window. Hover over it for the full text.
 
 To update the spreadsheet, use *Manage versions ▸ Upload new version* in Google Drive, so the link stays the same. Both uploaded Excel files and native Google Sheets work, and songsheet links embedded behind song names are kept.
 

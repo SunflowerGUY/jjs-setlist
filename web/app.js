@@ -2139,7 +2139,7 @@ async function downloadDrive(url) {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) {           // "PK": a real .xlsx (zip) file
     throw new Error(`Google sent a web page instead of the spreadsheet. ${DRIVE_SHARING}`);
   }
-  // The spreadsheet's own name, e.g. "JELLY JAZZ SETLIST - with links.xlsx"
+  // The spreadsheet's own name, e.g. "JELLY JAZZ Database - with links.xlsx"
   const cd = response.headers.get('content-disposition') || '';
   let file = 'Google Drive song database.xlsx';
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(cd), plain = /filename="([^"]+)"/i.exec(cd);
