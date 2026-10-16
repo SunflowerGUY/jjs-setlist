@@ -246,7 +246,7 @@ dialog h3 { margin: 0 0 12px; font-size: 1.15rem; }
   .print-table th { text-align: left; font-size: 8.5pt; border-bottom: 1px solid #000; padding: 1pt 4pt; }
   .print-table td { padding: .6pt 4pt; border-bottom: .5pt solid #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .print-table tr { break-inside: avoid; }
-  .print-table .n { width: 2.4em; text-align: right; }
+  .print-table .n { width: 30pt; text-align: right; text-overflow: clip; }
   .print-table .t { width: 40%; }
   .print-table .a { width: 25%; }
 }
