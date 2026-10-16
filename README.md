@@ -28,7 +28,7 @@
 
 - **4 sets of up to 16 songs**, with the current set clearly highlighted and each set's approximate running time (about 3½ minutes a song).
 - **Drag and drop** from the library into any set, within a set, between sets, or back to the library to remove. Buttons and keyboard shortcuts do the same.
-- **Song database on Google Drive**: *File ▸ Song Database Settings* takes the Drive share link of your spreadsheet. The app can load the latest copy each time it opens. If Drive can't be reached, it uses the copy kept in the browser, with a clear orange **⚠ BACKUP** notice. *(Needs the app opened from a web address. See below.)*
+- **Song database online (Google Drive or Dropbox)**: *File ▸ Song Database Settings* takes the share link of your spreadsheet. The app can load the latest copy each time it opens. If the online copy can't be reached, it uses the copy kept in the browser, with a clear orange **⚠ BACKUP** notice. *(Needs the app opened from a web address. See below.)*
 - **Song library from Excel** (`.xlsx`) **or CSV**, including links embedded behind song names. Instant search across song name, artist, style and vocalist. Songs already in the setlist are greyed out.
 - **Songsheet links**: songs with a link show 📄. Click the icon, or double-click a set song, to open its songsheet.
 - **Save and load named setlists** (e.g. *"Venue Name - March 2027"*). If a setlist's songs aren't in the loaded song database, they're marked ⚠ in orange and you're told which database it was made with. Right-click one and choose **Replace with…** to swap it for another song in the same place. The closest matches (same artist, similar title) are listed first.
@@ -61,29 +61,31 @@
 Then:
 
 1. **Keep the helper window open** while you use the app (minimise it if you like). Close it when you've finished.
-2. **File ▸ Open Song Database…** to choose your spreadsheet, or set up the Google Drive copy (below). Your saved setlists in `setlists` appear straight away.
+2. **File ▸ Open Song Database…** to choose your spreadsheet, or set up an online copy on Google Drive or Dropbox (below). Your saved setlists in `setlists` appear straight away.
 
 Next time, start the launcher again. If it's already running, it just opens the app. The bookmark works whenever the helper is running.
 
 The helper needs **Python 3.8 or newer** and nothing else. It uses only Python's standard library, and only this computer can connect to it. If Python is missing, the launcher says how to install it. On a Mac, accepting the offer to install the *command line developer tools* is enough. `READ ME FIRST.txt` has the same steps for people you send the app to.
 
-**Without the helper:** you can still double-click `web/index.html`. Everything works except the Google Drive copy, but settings and setlists are then kept in the browser only, not in the files. The label next to the song total shows which is in use: *💾 Saving to files in the project folder* or *Saving in this browser only*.
+**Without the helper:** you can still double-click `web/index.html`. Everything works except the online copy (Google Drive or Dropbox), but settings and setlists are then kept in the browser only, not in the files. The label next to the song total shows which is in use: *💾 Saving to files in the project folder* or *Saving in this browser only*.
 
 This is a **desktop** tool for planning gigs, made for a computer screen with a mouse and keyboard. It isn't designed for phones or tablets.
 
-### Song database on Google Drive
+### Song database online (Google Drive or Dropbox)
 
-1. In Google Drive, share the spreadsheet as **Anyone with the link** and copy the link (*Share ▸ Copy link*).
-2. In the app: **File ▸ Song Database Settings (Google Drive)…**, paste the link, press **Test link**, then **Save**.
+1. Copy the spreadsheet's share link (*Share ▸ Copy link*). In Google Drive, share it as **Anyone with the link**; in Dropbox, any share link works.
+2. In the app: **File ▸ Song Database Settings (Google Drive / Dropbox)…**, paste the link, press **Test link**, then **Save**.
 3. Choose which to use:
-   - **The Google Drive copy first**: the latest version is loaded each time the app opens. If Google Drive can't be reached (e.g. no internet), the copy kept in the browser is used and marked **⚠ BACKUP** in orange.
-   - **The spreadsheet I open on this computer**: Drive is used only when no song database is loaded, or when you choose *File ▸ Load Song Database from Google Drive*.
+   - **The online copy first**: the latest version is loaded each time the app opens. If it can't be reached (e.g. no internet), the copy kept in the browser is used and marked **⚠ BACKUP** in orange.
+   - **The spreadsheet I open on this computer**: the online copy is used only when no song database is loaded, or when you choose *File ▸ Load Song Database from Online Copy*.
 
-The label beside **Open Song Database…** shows which song list is in use and when the Drive copy was loaded, e.g. *JELLY JAZZ Database (215 songs, 215 songsheets) · Google Drive, 09 Oct 18:48*. It's in a narrow font so it fits, and wraps onto a second line on a narrow window. Hover over it for the full text.
+The label beside **Open Song Database…** shows which song list is in use and when the online copy was loaded, e.g. *JELLY JAZZ Database (215 songs, 215 songsheets) · Google Drive, 09 Oct 18:48*. It's in a narrow font so it fits, and wraps onto a second line on a narrow window. Hover over it for the full text.
 
-To update the spreadsheet, use *Manage versions ▸ Upload new version* in Google Drive, so the link stays the same. Both uploaded Excel files and native Google Sheets work, and songsheet links embedded behind song names are kept.
+To update the spreadsheet without changing the link: in Google Drive use *Manage versions ▸ Upload new version*; in Dropbox save over the same file. Uploaded Excel files and (on Google Drive) native Google Sheets both work, and songsheet links embedded behind song names are kept.
 
-> ⚠️ **Google Drive needs the app started with `Start JJ's Setlist.bat`** (or opened from an `https://` site). Google refuses downloads into a page opened by double-clicking `index.html`, and the app tells you so if you try.
+> ⚠️ **The online copy needs the app started with `Start JJ's Setlist.bat`** (or opened from an `https://` site). Google refuses downloads into a page opened by double-clicking `index.html`, and the app tells you so if you try.
+>
+> Only Google Drive and Dropbox links work for the song database. OneDrive, iCloud and others don't let a web page download the file.
 
 ---
 
@@ -134,7 +136,7 @@ The library is read from the **first worksheet** of an Excel workbook (or a CSV)
 - a `=HYPERLINK("url", "Song name")` formula, or
 - written out in a **Songsheet** column. This also works in CSV files.
 
-**Google Drive links work best.** Links to PDF files on your computer work when written relative to the `web` folder (e.g. `../3-temp-songs/Mountains of Mourne.pdf`).
+**Web links (Google Drive, Dropbox…) work best.** Links to PDF files on your computer work when written relative to the `web` folder (e.g. `../3-temp-songs/Mountains of Mourne.pdf`).
 
 > ⚠️ **Save as an Excel Workbook (`.xlsx`).** Saving as CSV throws away every embedded link. If you need a CSV, use **File ▸ Export Song Database as CSV (with web links)**.
 
@@ -147,11 +149,11 @@ The app picks one of three, shown by the label next to the song total:
 | What | ☁ Signed in to an online account | 💾 Started with the launcher (helper) | `index.html` double-clicked |
 |---|---|---|---|
 | Saved setlists | **In your account**, from any computer | **`setlists\*.json`** in the project folder, the same files as the desktop app | This browser only |
-| Colours, text size, Google Drive link | **In your account** | **`config.json`** in the project folder, shared with the desktop app's settings | This browser only |
-| Song library | **In your account** | Kept in the browser (reloaded from Google Drive or the spreadsheet) | This browser only |
+| Colours, text size, song database link (Google Drive / Dropbox) | **In your account** | **`config.json`** in the project folder, shared with the desktop app's settings | This browser only |
+| Song library | **In your account** | Kept in the browser (reloaded from the online copy or the spreadsheet) | This browser only |
 | The setlist on screen | Kept in the browser, per account. Cleared on sign-out | Kept in the browser, restored after a reload even if it wasn't saved | This browser only |
 
-`config.json` uses the desktop app's names for the colours (`library_colours`) and the Google Drive link (`backup_url`, `drive_first`), so the two editions share them. The browser's text size is kept separately (`web_font_size`), because the desktop app measures text in points.
+`config.json` uses the desktop app's names for the colours (`library_colours`) and the song database link (`backup_url`, `drive_first` - the names are historical; it can be Google Drive or Dropbox), so the two editions share them. The browser's text size is kept separately (`web_font_size`), because the desktop app measures text in points.
 
 Setlists kept in the browser only can be moved with *File ▸ Export This Setlist (.json)* and *File ▸ Import Saved Setlists*. Importing while the helper is running saves them into `setlists\`.
 
@@ -167,7 +169,7 @@ Turn them on and people sign in with **any email address and a password**, or wi
 
 - **One account per person, for all their bands.** Given a code for another band, a member signs in as usual and uses *Join a band with an invitation code* in the account menu. If they try to sign up again with the same email address, the app offers sign-in instead and adds the new band.
 - **Names:** each person has one name, shown on their account button and in every band's member list instead of their email address. *Change my name* is in the account menu. Accounts made before names existed are asked for one once.
-- **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours, text size and the Google Drive link stay personal: your Drive link is never shared with the band.
+- **A band's members share one song library and one set of saved setlists**, with full access. Everyone also keeps their **own private setlists**, and switches between them and their band(s) with the list at the top right. Colours, text size and the song database link stay personal: your Google Drive or Dropbox link is never shared with the band.
 - **Live notices:** the open band's setlists are watched. If someone saves the setlist you have open, a yellow bar under the toolbar says who (*"The Local Pub" was changed by Gary at 7:42 pm*), with **Reload** / **Not Now**. Saving over a version changed since you opened it asks first. Changes to other setlists get a line in the status bar. Each setlist saved online records who saved it.
 - **The administrator** (account menu ▸ *Bands & invitation codes*) creates bands, becoming each new band's first member (names that are the same apart from spaces, capitals or punctuation, like *Jelly Jazz* / *The Jelly-Jazz*, are caught), copies a band's invitation to send, **revokes** the code once everyone has joined (members keep access), makes new codes, and sees members by name or removes them.
 - **Invitation requests** (account menu; a number on the account button shows how many are waiting) lists who has asked, with a button to email them a band's invitation from your own email program. **No email is sent automatically**: Firebase's free plan can't send email, so check the list when you sign in. The band they asked for is chosen only when it matches one of yours (a close spelling is chosen with a note to check it). Otherwise it says *Choose a band…* and offers to create the band, so the wrong band's code isn't sent by accident.
@@ -201,7 +203,7 @@ Everything is in your Firebase project's **Firestore** database. Nothing is stor
 | Accounts that signed up with a code | `registered/<account ID>` |
 | The administrator(s) | `admins/<account ID>` |
 
-When a band uses **"Google Drive copy first"**, its songs really come from the Google Drive spreadsheet each time the app opens. `data/library` is then the backup copy used when Drive can't be reached, so change the songs in the spreadsheet. Logins (email, password, name) aren't in Firestore: they're under **Authentication ▸ Users** in the Firebase console.
+When a band uses **"The online copy first"**, its songs really come from the Google Drive or Dropbox spreadsheet each time the app opens. `data/library` is then the backup copy used when it can't be reached, so change the songs in the spreadsheet. Logins (email, password, name) aren't in Firestore: they're under **Authentication ▸ Users** in the Firebase console.
 
 To look at the data: Firebase console ▸ your project ▸ **Firestore Database ▸ Data**. ⚠️ Edits and deletes there take effect at once for everyone and **can't be undone**. Use the app to change setlists and songs.
 
@@ -221,11 +223,11 @@ Both are bundled in `web/lib/` (copied from cdnjs and checked against its publis
 Double-click **`Make Package.bat`** (or run `python make_package.py`). It makes **`packages/JJs Setlist - Browser Edition.zip`**, a single zip that works on all three systems:
 
 - the app, the helper and the three launchers, plus `READ ME FIRST.txt` with simple steps for each system;
-- your song spreadsheet, your saved setlists, and a `config.json` with just the **Google Drive link**, so the song database loads from Drive straight away (your colours and text size aren't included).
+- your song spreadsheet, your saved setlists, and a `config.json` with just the **song database link** (Google Drive or Dropbox), so the song database loads from it straight away (your colours and text size aren't included).
 
 The zip records **Unix file permissions and line endings**, so the Mac and Linux launchers stay double-clickable / runnable after unzipping. Send the zip itself: if it's unzipped and re-zipped on Windows, those permissions are lost (`READ ME FIRST.txt` explains the one-line fix, `chmod +x`).
 
-For sharing with anyone, **`Make Package.bat --public`** (or `python make_package.py --public`) makes `JJs Setlist - Browser Edition (public).zip`: the app only, with no spreadsheet, setlists or Drive link.
+For sharing with anyone, **`Make Package.bat --public`** (or `python make_package.py --public`) makes `JJs Setlist - Browser Edition (public).zip`: the app only, with no spreadsheet, setlists or song database link.
 
 ---
 
@@ -254,7 +256,7 @@ For sharing with anyone, **`Make Package.bat --public`** (or `python make_packag
 
 | File / folder | Purpose |
 |---|---|
-| `config.json` | Your settings: colours, text size, Google Drive link (made by the helper) |
+| `config.json` | Your settings: colours, text size, song database link (made by the helper) |
 | `setlists/` | Your saved setlists (made by the helper) |
 | your song spreadsheet (`.xlsx` / `.csv`) | Your song database |
 | `packages/` | The zips made by `Make Package.bat` |
