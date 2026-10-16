@@ -249,8 +249,8 @@ const state = {
   dbSource: 'file',                          // 'file' (opened here) or 'drive'
   dbLoaded: '',                              // when it was read (ISO date)
   dbBackup: '',                              // set when the backup copy is in use: why
-  driveUrl: '',                              // Google Drive share link (File > Song Database Settings)
-  driveFirst: true,                          // load the Drive copy each time the app opens
+  driveUrl: '',                              // Google Drive / Dropbox share link (File > Song Database Settings)
+  driveFirst: true,                          // load the online copy each time the app opens
   filtered: [],
   sets: normaliseSets([]),
   name: '',
@@ -1546,7 +1546,7 @@ async function offerImport(newAccount) {
   if (!bring.length) {
     if (newAccount) {
       saveSettings();                          // marks the account as set up
-      messageBox('Welcome to JJ\'s Setlist', `Your account is ready: ${accountName()}.\n\nOpen your song spreadsheet (File ▸ Open Song Database), or add its Google Drive link in File ▸ Song Database Settings. Setlists you save are kept in your account.`);
+      messageBox('Welcome to JJ\'s Setlist', `Your account is ready: ${accountName()}.\n\nOpen your song spreadsheet (File ▸ Open Song Database), or add its Google Drive or Dropbox link in File ▸ Song Database Settings. Setlists you save are kept in your account.`);
     } else {
       messageBox('Copy setlists', `There are no setlists on this computer that aren't in ${into} already.`);
     }
@@ -1649,7 +1649,7 @@ function renderLibrary() {
   if (state.library.length) {
     text = `${state.dbName}  (${plural(state.library.length, 'song')}, ${plural(links, 'songsheet')})`;
     if (state.dbBackup) text = `⚠ BACKUP: ${text}  ·  copy from ${shortDateTime(state.dbLoaded)}`;
-    else if (state.dbSource === 'drive') text += `  ·  Google Drive, ${shortDateTime(state.dbLoaded)}`;
+    else if (state.dbSource === 'drive') text += `  ·  ${onlineSite()}, ${shortDateTime(state.dbLoaded)}`;
   }
   label.textContent = text;
   label.classList.toggle('backup', !!state.dbBackup);
@@ -2079,7 +2079,7 @@ async function useSongs(songs, { file, source }) {
   renderAll();
   const links = songs.filter((s) => s.link).length;
   status(`Loaded ${plural(songs.length, 'song')} (${plural(links, 'songsheet link')}) from `
-    + (source === 'drive' ? 'Google Drive.' : `“${file}”.`)
+    + (source === 'drive' ? `${onlineSite()}.` : `“${file}”.`)
     + (kept ? '' : "  (This browser won't keep it for next time.)"));
   warnMissing();
 }
@@ -2098,14 +2098,18 @@ async function openDatabaseFile(file) {
   }
 }
 
-// ---------------------------------------------------------------- Google Drive copy
+// ---------------------------------------------------------------- online copy (Google Drive or Dropbox)
 const DRIVE_TIMEOUT = 15000;                 // ms
-const DRIVE_SHARING = 'Check the internet connection, and that the file is shared in Google Drive as “Anyone with the link”.';
-// Google refuses downloads into a page opened straight from a file
+const SHARING = {
+  'Google Drive': 'Check the internet connection, and that the file is shared in Google Drive as “Anyone with the link”.',
+  Dropbox: 'Check the internet connection, and that the link is a Dropbox share link (Share ▸ Copy link).',
+};
+// Google and Dropbox refuse downloads into a page opened straight from a file
 // (double-clicking index.html); it needs a web address (http://localhost or https://).
 const OPENED_AS_FILE = location.protocol === 'file:';
-const DRIVE_FILE_PAGE = "Google Drive doesn't allow downloads into a page opened straight from a file "
+const DRIVE_FILE_PAGE = "Online copies can't be downloaded into a page opened straight from a file "
   + '(double-clicking index.html). Open JJ\'s Setlist from a web address instead, e.g. http://localhost - see the README.';
+const NOT_A_LINK = "That doesn't look like a Google Drive or Dropbox link. Copy it from Share ▸ Copy link.";
 
 /** The file id in a Google Drive / Google Sheets share link, or ''. */
 function driveFileId(url) {
@@ -2113,37 +2117,66 @@ function driveFileId(url) {
   return m ? m[1] : '';
 }
 
-/** Download the spreadsheet behind a Drive share link as .xlsx: { songs, file }.
-    Uses Google Sheets' export address, which (unlike Drive's own download
-    link) lets a web page read the reply. Works for uploaded Excel files and
-    for Google Sheets. */
-async function downloadDrive(url) {
-  const id = driveFileId(url);
-  if (!id) throw new Error("That doesn't look like a Google Drive link.");
+/** Where a share link points: { site, url } with the address a web page can
+    download from, or null. Google Drive: Google Sheets' export address, which
+    (unlike Drive's own download link) lets a web page read the reply - it works
+    for uploaded Excel files and for Google Sheets. Dropbox: the same link on
+    dl.dropboxusercontent.com, which (unlike www.dropbox.com) does too. */
+function onlineLink(link) {
+  let u;
+  try { u = new URL((link || '').trim()); } catch { return null; }
+  const host = u.hostname.toLowerCase();
+  if (/(^|\.)(drive|docs)\.google\.com$/.test(host)) {
+    const id = driveFileId(link);
+    return id ? { site: 'Google Drive', url: `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx` } : null;
+  }
+  if (/(^|\.)dropbox(usercontent)?\.com$/.test(host)) {
+    u.hostname = 'dl.dropboxusercontent.com';
+    u.searchParams.delete('dl');
+    u.searchParams.delete('raw');
+    return { site: 'Dropbox', url: u.href };
+  }
+  return null;
+}
+
+/** The site name of the saved link, for messages: "Google Drive", "Dropbox", or "the online copy". */
+function onlineSite(link = state.driveUrl) {
+  return onlineLink(link)?.site || 'the online copy';
+}
+
+/** Download the spreadsheet behind a Google Drive or Dropbox share link as .xlsx: { songs, file }. */
+async function downloadDrive(link) {
+  const where = onlineLink(link);
+  if (!where) throw new Error(NOT_A_LINK);
+  const { site } = where, sharing = SHARING[site];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DRIVE_TIMEOUT);
   let response, buffer;
   try {
-    response = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`,
-      { cache: 'no-store', signal: controller.signal });
+    response = await fetch(where.url, { cache: 'no-store', signal: controller.signal });
     buffer = await response.arrayBuffer();
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`Google Drive didn't answer within ${DRIVE_TIMEOUT / 1000} seconds.`);
-    throw new Error(OPENED_AS_FILE ? DRIVE_FILE_PAGE : `Couldn't reach Google Drive. ${DRIVE_SHARING}`);
+    if (err.name === 'AbortError') throw new Error(`${site} didn't answer within ${DRIVE_TIMEOUT / 1000} seconds.`);
+    throw new Error(OPENED_AS_FILE ? DRIVE_FILE_PAGE : `Couldn't reach ${site}. ${sharing}`);
   } finally {
     clearTimeout(timer);
   }
-  if (response.status === 404) throw new Error("Google Drive couldn't find that file. Check the link.");
-  if (!response.ok) throw new Error(`Google Drive said “${response.status} ${response.statusText}”. ${DRIVE_SHARING}`);
+  if (response.status === 404) throw new Error(`${site} couldn't find that file. Check the link.`);
+  if (!response.ok) throw new Error(`${site} said “${response.status} ${response.statusText}”. ${sharing}`);
   const bytes = new Uint8Array(buffer, 0, Math.min(2, buffer.byteLength));
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) {           // "PK": a real .xlsx (zip) file
-    throw new Error(`Google sent a web page instead of the spreadsheet. ${DRIVE_SHARING}`);
+    throw new Error(`${site} sent a web page instead of the spreadsheet. ${sharing}`);
   }
-  // The spreadsheet's own name, e.g. "JELLY JAZZ Database - with links.xlsx"
+  // The spreadsheet's own name, e.g. "JELLY JAZZ Database - with links.xlsx":
+  // Google sends it in a header, a Dropbox link ends with it.
   const cd = response.headers.get('content-disposition') || '';
-  let file = 'Google Drive song database.xlsx';
+  let file = `${site} song database.xlsx`;
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(cd), plain = /filename="([^"]+)"/i.exec(cd);
-  try { if (utf8) file = decodeURIComponent(utf8[1]); else if (plain) file = plain[1]; } catch { /* keep the default */ }
+  try {
+    if (utf8) file = decodeURIComponent(utf8[1]);
+    else if (plain) file = plain[1];
+    else if (site === 'Dropbox') file = decodeURIComponent(new URL(where.url).pathname.split('/').pop()) || file;
+  } catch { /* keep the default */ }
   if (!/\.(xlsx|xlsm)$/i.test(file)) file += '.xlsx';
   const songs = parseDatabase(buffer, file);
   if (!songs.length) throw new Error(`There are no songs in its first worksheet. ${NO_SONGS_HELP}`);
@@ -2152,19 +2185,20 @@ async function downloadDrive(url) {
 
 let driveBusy = false;
 
-/** Load the song database from Google Drive. On failure the song database
-    already here stays in use - marked as the backup if Drive should have
+/** Load the song database from its online copy (Google Drive or Dropbox). On failure
+    the song database already here stays in use - marked as the backup if the online copy should have
     replaced it. startup: quieter messages when the app opens. */
 async function loadFromDrive({ startup = false } = {}) {
   if (!state.driveUrl) {
-    status('Add a Google Drive link first: File ▸ Song Database Settings…');
+    status('Add a Google Drive or Dropbox link first: File ▸ Song Database Settings…');
     if (!startup) databaseSettings();
     return false;
   }
   if (driveBusy) return false;
   driveBusy = true;
   document.body.classList.add('busy');
-  status('Loading the song database from Google Drive…');
+  const site = onlineSite();
+  status(`Loading the song database from ${site}…`);
   try {
     const { songs, file } = await downloadDrive(state.driveUrl);
     await useSongs(songs, { file, source: 'drive' });
@@ -2172,19 +2206,19 @@ async function loadFromDrive({ startup = false } = {}) {
   } catch (err) {
     document.body.classList.remove('busy');  // not while the message is showing
     if (state.library.length) {
-      state.dbBackup = `Google Drive couldn't be reached: ${err.message}`;
+      state.dbBackup = `${site} couldn't be reached: ${err.message}`;
       renderLibrary();
       status(`⚠ Using the BACKUP song database: the copy from ${dateTimeText(state.dbLoaded)}.`);
       const again = await dialog('Using the backup song database',
-        `The song database couldn't be loaded from Google Drive:\n\n   ${err.message}\n\n`
+        `The song database couldn't be loaded from ${site}:\n\n   ${err.message}\n\n`
         + `Using the copy kept in this browser instead:\n\n   “${state.dbName}”, from ${dateTimeText(state.dbLoaded)}\n\n`
         + 'It may be missing recent changes.',
         [{ label: 'OK', value: false }, { label: 'Try Again', value: true, primary: true }]);
       if (again) { driveBusy = false; return await loadFromDrive({ startup }); }
     } else {
-      status("Couldn't load the song database from Google Drive.");
+      status(`Couldn't load the song database from ${site}.`);
       await messageBox('Could not load the song database',
-        `The song database couldn't be loaded from Google Drive:\n\n   ${err.message}\n\nCheck File ▸ Song Database Settings, or open a spreadsheet from this computer.`);
+        `The song database couldn't be loaded from ${site}:\n\n   ${err.message}\n\nCheck File ▸ Song Database Settings, or open a spreadsheet from this computer.`);
     }
     return false;
   } finally {
@@ -2193,32 +2227,33 @@ async function loadFromDrive({ startup = false } = {}) {
   }
 }
 
-/** File > Song Database Settings: the Google Drive link and when to use it. */
+/** File > Song Database Settings: the Google Drive / Dropbox link and when to use it. */
 function databaseSettings() {
   const html = (OPENED_AS_FILE ? `<p class="drive-result bad">⚠ ${esc(DRIVE_FILE_PAGE)}</p>` : '') + `
-    <p>Keep your song spreadsheet on Google Drive, and every computer can load the latest version, with no file to copy around.</p>
-    <label for="driveUrl"><strong>Google Drive link to the song spreadsheet:</strong></label>
+    <p>Keep your song spreadsheet online - on Google Drive or Dropbox - and every computer can load the latest version, with no file to copy around.</p>
+    <label for="driveUrl"><strong>Google Drive or Dropbox link to the song spreadsheet:</strong></label>
     <div class="drive-row">
       <input id="driveUrl" type="text" spellcheck="false" autocomplete="off"
-        placeholder="https://drive.google.com/file/d/…  or  https://docs.google.com/spreadsheets/d/…">
+        placeholder="https://drive.google.com/file/d/…  or  https://www.dropbox.com/scl/fi/…">
       <button type="button" id="driveTest">Test link</button>
     </div>
     <div id="driveResult" class="drive-result"></div>
     <p><strong>Which to use:</strong></p>
     <label class="choice"><input type="radio" name="driveFirst" value="1">
-      <span><b>The Google Drive copy first</b> - always the latest. It's loaded each time the app opens.
-      If Google Drive can't be reached, the copy kept in this browser is used instead (marked ⚠ BACKUP).</span></label>
+      <span><b>The online copy first</b> - always the latest. It's loaded each time the app opens.
+      If it can't be reached, the copy kept in this browser is used instead (marked ⚠ BACKUP).</span></label>
     <label class="choice"><input type="radio" name="driveFirst" value="0">
-      <span><b>The spreadsheet I open on this computer.</b> Google Drive is used when no song database is loaded,
-      or when you choose File ▸ Load Song Database from Google Drive.</span></label>
-    <p class="muted small">Tips: in Google Drive, share the file as “Anyone with the link”. To update it, use
-    Manage versions ▸ Upload new version, so the link stays the same. Leave the link empty to stop using Google Drive.</p>`;
+      <span><b>The spreadsheet I open on this computer.</b> The online copy is used when no song database is loaded,
+      or when you choose File ▸ Load Song Database from Online Copy.</span></label>
+    <p class="muted small">Tips: in Google Drive, share the file as “Anyone with the link”, and update it with
+    Manage versions ▸ Upload new version, so the link stays the same. In Dropbox, use Share ▸ Copy link, and update it
+    by saving over the same file. Leave the link empty to stop using an online copy.</p>`;
   const p = dialog('Song Database Settings', html, [
     { label: 'Cancel', value: false },
     { label: 'Save', value: true, primary: true, check: () => {
       const link = $('#driveUrl').value.trim();
-      if (link && !driveFileId(link)) {
-        showDriveResult(false, "That doesn't look like a Google Drive link. Copy it from Share ▸ Copy link in Google Drive.");
+      if (link && !onlineLink(link)) {
+        showDriveResult(false, NOT_A_LINK);
         return false;
       }
       return true;
@@ -2251,9 +2286,9 @@ function databaseSettings() {
     state.driveUrl = link;
     state.driveFirst = document.querySelector('input[name=driveFirst]:checked')?.value === '1';
     saveSettings();
-    if (!link) { status('Google Drive is no longer used for the song database.'); return; }
+    if (!link) { status('An online copy is no longer used for the song database.'); return; }
     status('Song Database Settings saved.');
-    // Like the desktop app: load from Drive straight away when it's the first
+    // Like the desktop app: load the online copy straight away when it's the first
     // choice, the link is new, or nothing is loaded yet.
     if (state.driveFirst || changed || !state.library.length) await loadFromDrive();
   });
@@ -2739,11 +2774,11 @@ const GUIDES = {
       ['p', 'The first part is the link, the second is the song name shown.'],
       ['h3', 'Method C - a separate link column'],
       ['p', 'Add a column headed Songsheet (or Link, URL, PDF) and type the web address in it. This also works in CSV files.'],
-      ['h2', '4.  Getting a Google Drive link for a PDF'],
-      ['n', '1.  In Google Drive, right-click the PDF ▸ Share ▸ Copy link.'],
-      ['n', '2.  If bandmates will use the songsheets too, set General access to “Anyone with the link”.'],
+      ['h2', '4.  Getting a web link for a PDF (Google Drive, Dropbox…)'],
+      ['n', '1.  In Google Drive or Dropbox, right-click the PDF ▸ Share ▸ Copy link.'],
+      ['n', '2.  If bandmates will use the songsheets too, make sure anyone with the link can view it (Google Drive: General access ▸ “Anyone with the link”).'],
       ['n', '3.  Paste the link into the spreadsheet with Ctrl+K, as in Method A.'],
-      ['warn', 'Web links (e.g. Google Drive) work everywhere. Links to PDF files on your computer only open when JJ\'s Setlist is started with its launcher, and the PDFs are inside its folder (e.g. a Songsheets folder in it) - use a link like Songsheets\\El Paso.pdf. They don\'t work in the online version.'],
+      ['warn', 'Web links (e.g. Google Drive, Dropbox) work everywhere. Links to PDF files on your computer only open when JJ\'s Setlist is started with its launcher, and the PDFs are inside its folder (e.g. a Songsheets folder in it) - use a link like Songsheets\\El Paso.pdf. They don\'t work in the online version.'],
       ['h2', '5.  Editing a linked cell (in Excel)'],
       ['b', 'Clicking a linked cell opens the link. To edit the name instead, select the cell with the arrow keys (or click and hold) and press F2.'],
       ['b', 'Editing the text keeps the link. To change the link, press Ctrl+K.'],
@@ -2753,17 +2788,18 @@ const GUIDES = {
       ['b', 'Only the first worksheet is read. Formatting (fonts, colours, column widths) doesn\'t matter.'],
       ['h2', '7.  Loading it into JJ\'s Setlist'],
       ['b', 'File ▸ Open Song Database… (Ctrl+O) and choose the .xlsx. The songs are remembered (in your account when signed in), so next time the library is already there.'],
-      ['b', 'After editing the spreadsheet, open it again the same way - a browser can\'t re-read a file on its own. (A Google Drive copy, below, is re-read automatically.)'],
+      ['b', 'After editing the spreadsheet, open it again the same way - a browser can\'t re-read a file on its own. (An online copy on Google Drive or Dropbox, below, is re-read automatically.)'],
       ['b', 'The top bar shows how many songs and songsheets were found - if the songsheet count is 0, the file was probably saved as CSV.'],
       ['tip', 'You can also drag the spreadsheet file straight onto the JJ\'s Setlist window.'],
-      ['h2', '8.  Keeping it on Google Drive'],
-      ['p', 'Keep the spreadsheet on Google Drive and JJ\'s Setlist can load the latest version each time it opens - on any computer, and for bandmates too.'],
-      ['n', '1.  Upload the .xlsx to Google Drive (or make it in Google Sheets) and share it as “Anyone with the link”.'],
-      ['n', '2.  Right-click it in Drive ▸ Share ▸ Copy link.'],
-      ['n', '3.  In JJ\'s Setlist: File ▸ Song Database Settings, paste the link, click Test link, choose “The Google Drive copy first”, then Save.'],
-      ['b', 'If Google Drive can\'t be reached (e.g. no internet), the copy kept from last time is used, and the top bar shows ⚠ BACKUP in orange.'],
-      ['warn', 'To update a Drive copy, use Manage versions ▸ Upload new version in Google Drive. Deleting it and uploading a new file gives it a new link.'],
-      ['warn', 'Loading from Google Drive needs JJ\'s Setlist opened from a web address - online, or started with its launcher - not by double-clicking index.html.'],
+      ['h2', '8.  Keeping it online (Google Drive or Dropbox)'],
+      ['p', 'Keep the spreadsheet on Google Drive or Dropbox and JJ\'s Setlist can load the latest version each time it opens - on any computer, and for bandmates too.'],
+      ['n', '1.  Upload the .xlsx to Google Drive (or make it in Google Sheets) or to Dropbox.'],
+      ['n', '2.  Right-click it ▸ Share ▸ Copy link. In Google Drive, share it as “Anyone with the link”.'],
+      ['n', '3.  In JJ\'s Setlist: File ▸ Song Database Settings, paste the link, click Test link, choose “The online copy first”, then Save.'],
+      ['b', 'If the online copy can\'t be reached (e.g. no internet), the copy kept from last time is used, and the top bar shows ⚠ BACKUP in orange.'],
+      ['warn', 'To update it without changing the link: in Google Drive use Manage versions ▸ Upload new version; in Dropbox save over the same file. Deleting it and uploading a new file gives it a new link.'],
+      ['warn', 'Other sites (OneDrive, iCloud…) can\'t be used for the song database - only Google Drive and Dropbox.'],
+      ['warn', 'Loading an online copy needs JJ\'s Setlist opened from a web address - online, or started with its launcher - not by double-clicking index.html.'],
     ],
   },
 
@@ -2788,7 +2824,7 @@ const GUIDES = {
       ['b', 'Extra commas at the end of lines are fine - they\'re ignored.'],
       ['h2', '3.  Songsheet links in a CSV'],
       ['p', 'Type (or paste) the full link into the Songsheet column:'],
-      ['b', 'A web address, e.g. a Google Drive link (Drive: right-click the PDF ▸ Share ▸ Copy link). These work everywhere.'],
+      ['b', 'A web address, e.g. a Google Drive or Dropbox link (right-click the PDF ▸ Share ▸ Copy link). These work everywhere.'],
       ['b', 'Or a file inside JJ\'s Setlist\'s folder, e.g.  Songsheets\\El Paso.pdf  - this only opens when JJ\'s Setlist is started with its launcher, not online.'],
       ['p', 'Songs with a link show 📄 in the app, exactly as with Excel.'],
       ['h2', '4.  Saving a CSV'],
@@ -2822,7 +2858,7 @@ const GUIDES = {
       ['b', 'If another member saves the setlist you have open, a yellow bar under the toolbar says who changed it, with Reload to see their version. If you save over it anyway, you\'re asked first, so nobody\'s changes are replaced by accident.'],
       ['b', 'You also have your own private setlists. Switch between them and your band(s) with the list at the top right, next to your name.'],
       ['b', 'The label next to the song total shows which is open, e.g. ☁ Saving to Jelly Jazz, or ☁ Saving to your account.'],
-      ['b', 'Colours and text size are always your own; a band\'s Google Drive link (File ▸ Song Database Settings) is shared by its members.'],
+      ['b', 'Colours, text size and the song database link (File ▸ Song Database Settings) are always your own - never shared with a band.'],
       ['h2', 'In more than one band?'],
       ['p', 'One account covers all your bands - don\'t make a second one. Given a code for another band, sign in as usual, then use Join a band with an invitation code in your account menu. Each band then appears in the list at the top right, with its own songs and setlists.'],
       ['b', 'If you try to sign up again with the same email address, JJ\'s Setlist offers to sign you in instead, and adds the new band to your account.'],
@@ -2910,16 +2946,16 @@ const TEMPLATE_STEPS = [
   'Replace the example rows with your own songs - one song per row. '
     + 'Only SONG NAME is required; Artist, Style and Vocalist are optional.',
   'Optional - songsheet links: click a song name, press Ctrl+K, paste the web address '
-    + 'of its PDF (e.g. a Google Drive link) and click OK.',
+    + 'of its PDF (e.g. a Google Drive or Dropbox link) and click OK.',
   'Save with Ctrl+S. Keep it as an Excel Workbook (.xlsx) - saving as CSV loses the links.',
   "Back in JJ's Setlist, choose File ▸ Open Song Database and pick this spreadsheet - "
-    + 'or upload it to Google Drive and add its link in File ▸ Song Database Settings.',
+    + 'or upload it to Google Drive or Dropbox and add its link in File ▸ Song Database Settings.',
 ];
 const CSV_TEMPLATE_STEPS = [
   'Open the template in Excel (or any spreadsheet program).',
   'Replace the example rows with your own songs - one song per row. '
     + 'Only SONG NAME is required; the other columns are optional.',
-  'Songsheet links: put the web address of each PDF (e.g. a Google Drive link) in the Songsheet column.',
+  'Songsheet links: put the web address of each PDF (e.g. a Google Drive or Dropbox link) in the Songsheet column.',
   'Save it, keeping the CSV format.',
   "Back in JJ's Setlist, choose File ▸ Open Song Database and pick this file.",
 ];
@@ -3080,6 +3116,9 @@ function wireEvents() {
   document.querySelectorAll('kbd[data-keys]').forEach((k) => {
     k.textContent = k.dataset.keys.replace('Ctrl+', MOD).replace('Alt+', IS_MAC ? '⌥' : 'Alt+');
   });
+
+  // Choosing a saved setlist loads it straight away (the Load button still reloads it)
+  $('#saved').addEventListener('change', () => { if ($('#saved').value) loadSelected(); });
 
   // Files
   $('#dbFile').addEventListener('change', async (e) => {
@@ -3288,10 +3327,10 @@ async function start() {
   } else if (mode === 'cloud' && !cloud.user.displayName && !store.get('nameAsked', false, accountPrefix())) {
     changeName(true);                         // signed up before names: ask once
   }
-  // Google Drive copy: each time the app opens when it's the first choice,
+  // Online copy: each time the app opens when it's the first choice,
   // or as the backup when no song database is loaded here.
   if (state.driveUrl && (state.driveFirst || !state.library.length)) {
-    if (OPENED_AS_FILE) status('Google Drive copy not loaded: it needs JJ\'s Setlist opened from a web address (see the README).');
+    if (OPENED_AS_FILE) status('Online copy not loaded: it needs JJ\'s Setlist opened from a web address (see the README).');
     else loadFromDrive({ startup: true });
   }
 }

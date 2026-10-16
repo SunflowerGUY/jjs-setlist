@@ -251,7 +251,7 @@ dialog h3 { margin: 0 0 12px; font-size: 1.15rem; }
   .print-table .a { width: 25%; }
 }
 
-/* ---------- song database: Google Drive copy */
+/* ---------- song database: online copy (Google Drive / Dropbox) */
 #dbLabel.backup { color: var(--missing); font-weight: 600; }
 body.busy, body.busy * { cursor: progress !important; }
 .drive-row { display: flex; gap: 8px; margin: 6px 0 4px; }
