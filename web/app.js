@@ -3155,6 +3155,12 @@ function wireEvents() {
       if (state.filtered.length) select('lib', 0);
     }
   });
+  $('#searchClear').addEventListener('click', () => {
+    const search = $('#search');
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    search.focus();
+  });
   $('#setName').addEventListener('input', (e) => {
     state.name = e.target.value;
     state.dirty = true;

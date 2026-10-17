@@ -118,7 +118,10 @@
       <h2>Song Library</h2>
       <div class="search">
         <label for="search">Search:</label>
-        <input id="search" type="search" autocomplete="off" placeholder="Song, artist, style or vocalist">
+        <span class="search-box">
+          <input id="search" type="search" autocomplete="off" placeholder="Song, artist, style or vocalist">
+          <button type="button" id="searchClear" class="search-clear" title="Clear search (Esc)" aria-label="Clear search">✕</button>
+        </span>
       </div>
       <div class="lib-frame">
         <ul id="libList" class="songs lib-list" tabindex="0" data-list="lib"></ul>

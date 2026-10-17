@@ -125,6 +125,19 @@ kbd:empty { display: none; }
 .library { border-color: var(--lib-frame); }
 .search { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .search input { flex: 1; }
+/* Library search: our own ✕ inside the box (the browser's built-in one only
+   shows on hover in Chrome/Edge, and never in Firefox). Hidden while empty. */
+.search-box { position: relative; flex: 1; display: flex; min-width: 0; }
+.search-box input { padding-right: 30px; }
+.search-box input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.search-clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  border: 0; background: none; border-radius: 50%;
+  padding: 0; width: 22px; height: 22px; line-height: 22px;
+  color: var(--muted); font-size: .9rem;
+}
+.search-clear:hover { background: var(--button-hover); color: inherit; }
+.search-box input:placeholder-shown + .search-clear { display: none; }
 .lib-frame { position: relative; flex: 1; min-height: 0; display: flex; }
 
 /* ---------- song lists */
