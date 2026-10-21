@@ -29,7 +29,7 @@
 - **4 sets of up to 16 songs**, with the current set clearly highlighted and each set's approximate running time (about 3½ minutes a song).
 - **Drag and drop** from the library into any set, within a set, between sets, or back to the library to remove. Buttons and keyboard shortcuts do the same.
 - **Song database online (Google Drive or Dropbox)**: *File ▸ Song Database Settings* takes the share link of your spreadsheet. The app can load the latest copy each time it opens. If the online copy can't be reached, it uses the copy kept in the browser, with a clear orange **⚠ BACKUP** notice. *(Needs the app opened from a web address. See below.)*
-- **Song library from Excel** (`.xlsx`) **or CSV**, including links embedded behind song names. Instant search across song name, artist, style and vocalist. Songs already in the setlist are greyed out.
+- **Song library from Excel** (`.xlsx`) **or CSV**, including links embedded behind song names. Instant search across every column. Songs already in the setlist are greyed out.
 - **Songsheet links**: songs with a link show 📄. Click the icon, or double-click a set song, to open its songsheet.
 - **Save and load named setlists** (e.g. *"Venue Name - March 2027"*). If a setlist's songs aren't in the loaded song database, they're marked ⚠ in orange and you're told which database it was made with. Right-click one and choose **Replace with…** to swap it for another song in the same place. The closest matches (same artist, similar title) are listed first.
 - **Same setlist files as the desktop app**: export a setlist as `.json` and drop it in the desktop app's `setlists` folder, or import the desktop app's setlists here.
@@ -120,15 +120,18 @@ To update the spreadsheet without changing the link: in Google Drive use *Manage
 
 ## Your song spreadsheet
 
-The library is read from the **first worksheet** of an Excel workbook (or a CSV). Row 1 holds the headings. Any order works, capitals don't matter, and extra columns are ignored:
+The library is read from the **first worksheet** of an Excel workbook (or a CSV). Row 1 holds the headings. **Use any headings you like** - e.g. `SONG NAME, Artist, Style, Vocalist` or `Song Name, Composer, Key, Format, Year`. The app shows, searches, prints and exports every column under its own heading, in the sheet's order. Capitals don't matter.
 
-| Heading | Required | Also accepted |
-|---|---|---|
-| **SONG NAME** | ✅ | Title, Song, Song Title, Name, Track |
-| **Artist** | | Band, Performer, Original Artist |
-| **Style** | | Genre, Type |
-| **Vocalist** | | Singer, Vocals, Vocal, Lead Vocal |
-| **Songsheet** | | Link, URL, PDF, Sheet, Chart |
+Two columns are recognised by name:
+
+| Column | Headings accepted |
+|---|---|
+| **Song name** (required) | SONG NAME, Title, Song, Song Title, Name, Track - otherwise the first column |
+| **Songsheet** link | Songsheet, Link, URL, PDF, Sheet, Chart |
+
+- The column after the song name is shown next to it in the library; the others follow in [brackets].
+- Songs are told apart by name plus their **Artist** column (also accepted: Band, Performer, Original Artist, Composer, Songwriter, Writer).
+- Columns with no heading, or empty for every song, are left out.
 
 **Songsheet links** can be:
 

@@ -13,10 +13,11 @@ const MAX_SONGS = 16;
 const MINUTES_PER_SONG = 3.5;           // for each set's approximate running time
 const DEFAULT_FONT = 15, MIN_FONT = 11, MAX_FONT = 26;
 
-// Spreadsheet header names recognised for each field (case-insensitive).
+// Spreadsheet header names recognised for each field (case-insensitive). Any
+// other headed column is kept too, and shown under its own heading.
 const COLUMN_ALIASES = {
   title: ['title', 'song', 'song title', 'song name', 'name', 'track'],
-  artist: ['artist', 'band', 'performer', 'original artist', 'by'],
+  artist: ['artist', 'band', 'performer', 'original artist', 'by', 'composer', 'songwriter', 'writer'],
   style: ['style', 'genre', 'type'],
   vocalist: ['vocalist', 'vocals', 'vocal', 'singer', 'lead vocal'],
   link: ['link', 'url', 'pdf', 'songsheet', 'song sheet', 'sheet', 'chart'],
@@ -89,21 +90,35 @@ function songId(song) {
   return fold(song.title) + '\u0000' + fold(song.artist || '');
 }
 
+/** The song database's columns after the song name: [{ key, label }] in the
+    spreadsheet's order, labelled with its own headings. */
+const detailColumns = () => state.columns.filter((c) => c.key !== 'title');
+const firstDetail = (song) => song[detailColumns()[0]?.key] || '';
+
+/** The details shown in [brackets]: every column after the first one. */
 function extrasOf(song) {
-  return ['style', 'vocalist'].map((k) => song[k]).filter(Boolean).join(' · ');
+  return detailColumns().slice(1).map((c) => song[c.key]).filter(Boolean).join(' · ');
 }
 
 function songLabel(song) {
   let text = (song.link ? '📄 ' : '') + song.title;
-  if (song.artist) text += `  —  ${song.artist}`;
+  if (firstDetail(song)) text += `  —  ${firstDetail(song)}`;
   const extras = extrasOf(song);
   if (extras) text += `   [${extras}]`;
   return text;
 }
 
+/** "Song name, artist, style or vocalist" - for the Search boxes. */
+function searchHint() {
+  const names = ['Song', ...detailColumns().map((c) => fold(c.label))];
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : 'Song';
+}
+
+/** Songs from a spreadsheet's rows: { songs, columns }. */
 function rowsToSongs(rows, links) {
-  if (!rows.length) return [];
-  const header = rows[0].map((h) => fold(cellToText(h)));
+  if (!rows.length) return { songs: [], columns: [] };
+  const headings = rows[0].map(cellToText);
+  const header = headings.map(fold);
   const cols = {};
   for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
     for (const alias of aliases) {
@@ -112,6 +127,14 @@ function rowsToSongs(rows, links) {
     }
   }
   if (!('title' in cols)) cols.title = 0;   // no recognised title column: use the first
+  // Every other headed column, named after its heading (made unique).
+  const used = new Set(Object.values(cols));
+  header.forEach((h, idx) => {
+    if (!h || used.has(idx)) return;
+    let key = h;
+    for (let k = 2; Object.hasOwn(cols, key); k++) key = `${h} ${k}`;
+    cols[key] = idx;
+  });
 
   const songs = [];
   rows.slice(1).forEach((row, i) => {
@@ -127,7 +150,13 @@ function rowsToSongs(rows, links) {
     }
     songs.push(song);
   });
-  return songs;
+  // The song name first, then the other columns in the sheet's order - leaving
+  // out any that are empty for every song.
+  const columns = Object.entries(cols)
+    .filter(([key]) => key === 'title' || (key !== 'link' && songs.some((s) => s[key])))
+    .sort(([a, i], [b, j]) => (b === 'title') - (a === 'title') || i - j)
+    .map(([key, idx]) => ({ key, label: headings[idx] || (key === 'title' ? 'SONG NAME' : key) }));
+  return { songs, columns };
 }
 
 function readXlsx(buffer) {
@@ -219,10 +248,9 @@ function resolveLink(link) {
   try { return new URL(link.replace(/\\/g, '/'), location.href).href; } catch { return link; }
 }
 
-// Plain-text columns (for the text export): Song Name, Artist, Style, Vocalist.
+// Plain-text columns (for the text export): the song database's own columns.
 function songTable(songs, numbered, sizeTo) {
-  const cols = [['title', 'SONG NAME', 46], ['artist', 'ARTIST', 26],
-    ['style', 'STYLE', 18], ['vocalist', 'VOCALIST', 16]];
+  const cols = state.columns.map((c, i) => [c.key, c.label.toUpperCase(), [46, 26][i] || 18]);
   const widths = cols.map(([key, head, cap]) =>
     Math.min(cap, Math.max(head.length, ...(sizeTo || songs).map((s) => (s[key] || '').length))));
   const fit = (t, w) => (t.length <= w ? t : t.slice(0, w - 1) + '…').padEnd(w);
@@ -242,8 +270,13 @@ function textHeading(title, subtitle) {
 }
 
 // ---------------------------------------------------------------- state
+// A song database's columns when it doesn't say (kept before columns were).
+const DEFAULT_COLUMNS = [{ key: 'title', label: 'SONG NAME' }, { key: 'artist', label: 'Artist' },
+  { key: 'style', label: 'Style' }, { key: 'vocalist', label: 'Vocalist' }];
+
 const state = {
   library: [],
+  columns: DEFAULT_COLUMNS,                  // [{ key, label }]: the song name first
   dbName: '',                                // spreadsheet name without extension
   dbFile: '',                                // file name, saved into setlists
   dbSource: 'file',                          // 'file' (opened here) or 'drive'
@@ -284,10 +317,13 @@ function loadLocalState() {
   });
 }
 
-/** A kept song library: { name, file, songs, source, loaded } (or null for none). */
+/** A kept song library: { name, file, songs, columns, source, loaded } (or null for none). */
 function useLibraryData(library) {
+  const columns = Array.isArray(library?.columns) && library.columns[0]?.key === 'title'
+    ? library.columns : DEFAULT_COLUMNS;
   Object.assign(state, {
     library: Array.isArray(library?.songs) ? library.songs : [],
+    columns,
     dbName: library?.name || '',
     dbFile: library?.file || '',
     dbSource: library?.source || 'file',
@@ -1619,7 +1655,7 @@ function songHtml(song, number, missing) {
     + '<span class="label">'
     + (missing ? '⚠ ' : '')
     + esc(song.title)
-    + (song.artist ? `  —  ${esc(song.artist)}` : '')
+    + (firstDetail(song) ? `  —  ${esc(firstDetail(song))}` : '')
     + (extras ? `<span class="extras">   [${esc(extras)}]</span>` : '')
     + '</span>';
 }
@@ -1643,6 +1679,7 @@ function renderLibrary() {
   $('#libCount').textContent = state.library.length
     ? `${state.filtered.length} of ${state.library.length} songs` : '';
   $('#getStarted').hidden = state.library.length > 0;
+  $('#search').placeholder = searchHint();
   const links = state.library.filter((s) => s.link).length;
   const label = $('#dbLabel');
   let text = 'No song database loaded';
@@ -1919,15 +1956,16 @@ function spellingSimilarity(a, b) {
 const SMALL_WORDS = new Set(['the', 'a', 'of', 'in', 'my']);
 const titleWords = (t) => new Set((fold(t).match(/[\p{L}\p{N}]+/gu) || []).filter((w) => !SMALL_WORDS.has(w)));
 
-/** Library songs, most likely replacements for `old` first: same artist, then
-    shared words in the title (e.g. a renamed song), then similar spelling. */
+/** Library songs, most likely replacements for `old` first: same artist (the
+    column after the song name), then shared words in the title (e.g. a renamed
+    song), then similar spelling. */
 function rankReplacements(old) {
-  const oldTitle = fold(old.title), oldWords = titleWords(old.title), oldArtist = fold(old.artist);
+  const oldTitle = fold(old.title), oldWords = titleWords(old.title), oldArtist = fold(firstDetail(old));
   return state.library.map((song) => {
     const words = titleWords(song.title);
     return {
       song,
-      sameArtist: !!oldArtist && fold(song.artist) === oldArtist ? 1 : 0,
+      sameArtist: !!oldArtist && fold(firstDetail(song)) === oldArtist ? 1 : 0,
       shared: [...oldWords].filter((w) => words.has(w)).length,
       spelling: spellingSimilarity(oldTitle, fold(song.title)),
     };
@@ -1942,11 +1980,11 @@ async function replaceSong(n, i) {
   if (!state.library.length) { await messageBox('Replace song', 'Open a song database first.'); return; }
   const ranked = rankReplacements(old);
   let shown = [], chosen = 0;
-  const html = `<p class="replace-what">Replace <b>“${esc(old.title)}”</b>${old.artist ? `  —  ${esc(old.artist)}` : ''}
+  const html = `<p class="replace-what">Replace <b>“${esc(old.title)}”</b>${firstDetail(old) ? `  —  ${esc(firstDetail(old))}` : ''}
       <br><span class="muted">Set ${n + 1}, position ${i + 1}${isMissing(old) ? ' · ⚠ not in the song database' : ''}</span></p>
     <p class="muted small">with this song (the closest matches are first):</p>
     <div class="search"><label for="replSearch">Search:</label>
-      <input id="replSearch" type="search" autocomplete="off" placeholder="Song, artist, style or vocalist"></div>
+      <input id="replSearch" type="search" autocomplete="off" placeholder="${esc(searchHint())}"></div>
     <ul id="replList" class="songs lib-list replace-list" tabindex="0"></ul>`;
   const p = dialog('Replace song', html, [
     { label: 'Cancel', value: false },
@@ -2051,28 +2089,31 @@ function setupDragging() {
 // ---------------------------------------------------------------- song database
 const NO_SONGS_HELP = 'Row 1 should hold the headings (e.g. SONG NAME, Artist, Style, Vocalist), with one song per row below.';
 
-/** Songs from a spreadsheet's contents (.xlsx / .xlsm, else CSV), sorted by title. */
+/** Songs from a spreadsheet's contents (.xlsx / .xlsm, else CSV), sorted by
+    title: { songs, columns }. */
 function parseDatabase(buffer, filename) {
-  let songs;
+  let found;
   if (/\.(xlsx|xlsm)$/i.test(filename)) {
     const { rows, links } = readXlsx(buffer);
-    songs = rowsToSongs(rows, links);
+    found = rowsToSongs(rows, links);
   } else {
-    songs = rowsToSongs(parseCsv(decodeText(buffer)));
+    found = rowsToSongs(parseCsv(decodeText(buffer)));
   }
-  return songs.sort((a, b) => fold(a.title).localeCompare(fold(b.title)));
+  found.songs.sort((a, b) => fold(a.title).localeCompare(fold(b.title)));
+  return found;
 }
 
 /** Show a freshly loaded song database and remember it for next time. */
-async function useSongs(songs, { file, source }) {
+async function useSongs({ songs, columns }, { file, source }) {
   state.library = songs;
+  state.columns = columns;
   state.dbName = stem(file);
   state.dbFile = file;
   state.dbSource = source;
   state.dbLoaded = new Date().toISOString();
   state.dbBackup = '';
   state.sel = { list: 'lib', index: -1 };
-  const kept = await saveLibrary({ name: state.dbName, file, songs, source, loaded: state.dbLoaded });
+  const kept = await saveLibrary({ name: state.dbName, file, songs, columns, source, loaded: state.dbLoaded });
   // Refresh set songs with the latest details (e.g. new songsheet links).
   state.sets = state.sets.map((st) => st.map(latestDetails));
   saveWorking();
@@ -2086,12 +2127,12 @@ async function useSongs(songs, { file, source }) {
 
 async function openDatabaseFile(file) {
   try {
-    const songs = parseDatabase(await file.arrayBuffer(), file.name);
-    if (!songs.length) {
+    const found = parseDatabase(await file.arrayBuffer(), file.name);
+    if (!found.songs.length) {
       await messageBox('No songs found', `“${file.name}” has no songs in its first worksheet.\n\n${NO_SONGS_HELP}`);
       return;
     }
-    await useSongs(songs, { file: file.name, source: 'file' });
+    await useSongs(found, { file: file.name, source: 'file' });
   } catch (err) {
     console.error(err);
     await messageBox('Could not open the song database', `“${file.name}” couldn't be read.\n\n${err.message || err}`);
@@ -2144,7 +2185,7 @@ function onlineSite(link = state.driveUrl) {
   return onlineLink(link)?.site || 'the online copy';
 }
 
-/** Download the spreadsheet behind a Google Drive or Dropbox share link as .xlsx: { songs, file }. */
+/** Download the spreadsheet behind a Google Drive or Dropbox share link as .xlsx: { songs, columns, file }. */
 async function downloadDrive(link) {
   const where = onlineLink(link);
   if (!where) throw new Error(NOT_A_LINK);
@@ -2178,9 +2219,9 @@ async function downloadDrive(link) {
     else if (site === 'Dropbox') file = decodeURIComponent(new URL(where.url).pathname.split('/').pop()) || file;
   } catch { /* keep the default */ }
   if (!/\.(xlsx|xlsm)$/i.test(file)) file += '.xlsx';
-  const songs = parseDatabase(buffer, file);
-  if (!songs.length) throw new Error(`There are no songs in its first worksheet. ${NO_SONGS_HELP}`);
-  return { songs, file };
+  const found = parseDatabase(buffer, file);
+  if (!found.songs.length) throw new Error(`There are no songs in its first worksheet. ${NO_SONGS_HELP}`);
+  return { ...found, file };
 }
 
 let driveBusy = false;
@@ -2200,8 +2241,8 @@ async function loadFromDrive({ startup = false } = {}) {
   const site = onlineSite();
   status(`Loading the song database from ${site}…`);
   try {
-    const { songs, file } = await downloadDrive(state.driveUrl);
-    await useSongs(songs, { file, source: 'drive' });
+    const { file, ...found } = await downloadDrive(state.driveUrl);
+    await useSongs(found, { file, source: 'drive' });
     return true;
   } catch (err) {
     document.body.classList.remove('busy');  // not while the message is showing
@@ -2564,26 +2605,30 @@ function exportText() {
 }
 
 function exportCsv() {
-  const rows = [['Set', '#', 'Song Name', 'Artist', 'Style', 'Vocalist', 'Songsheet']];
+  const rows = [['Set', '#', ...state.columns.map((c) => c.label), 'Songsheet']];
   state.sets.forEach((songs, n) => songs.forEach((s, i) =>
-    rows.push([n + 1, i + 1, s.title, s.artist, s.style, s.vocalist, s.link])));
+    rows.push([n + 1, i + 1, ...state.columns.map((c) => s[c.key]), s.link])));
   download(exportName('csv'), '﻿' + rows.map((r) => r.map(csvField).join(',')).join('\r\n'), 'text/csv');
 }
 
 function exportDbCsv() {
   if (!state.library.length) { status('Open a song database first.'); return; }
-  const rows = [['SONG NAME', 'Artist', 'Style', 'Vocalist', 'Songsheet']];
-  state.library.forEach((s) => rows.push([s.title, s.artist, s.style, s.vocalist, s.link]));
+  const rows = [[...state.columns.map((c) => c.label), 'Songsheet']];
+  state.library.forEach((s) => rows.push([...state.columns.map((c) => s[c.key]), s.link]));
   download(`${state.dbName || 'Song Database'} (with links).csv`,
     '﻿' + rows.map((r) => r.map(csvField).join(',')).join('\r\n'), 'text/csv');
 }
 
+/** The song database's columns, under its own headings. The song name and the
+    column after it are widest; with more than four columns they give up some room. */
 function printTable(songs, numbered) {
+  const cols = state.columns, many = cols.length > 4;
+  const width = (i) => (i === 0 ? ` style="width:${many ? 32 : 40}%"` : i === 1 ? ` style="width:${many ? 20 : 25}%"` : '');
   return '<table class="print-table"><thead><tr>'
     + (numbered ? '<th class="n">#</th>' : '')
-    + '<th class="t">SONG NAME</th><th class="a">ARTIST</th><th>STYLE</th><th>VOCALIST</th></tr></thead><tbody>'
+    + cols.map((c, i) => `<th${width(i)}>${esc(c.label.toUpperCase())}</th>`).join('') + '</tr></thead><tbody>'
     + songs.map((s, i) => '<tr>' + (numbered ? `<td class="n">${i + 1}.</td>` : '')
-      + `<td class="t">${esc(s.title)}</td><td class="a">${esc(s.artist)}</td><td>${esc(s.style)}</td><td>${esc(s.vocalist)}</td></tr>`).join('')
+      + cols.map((c) => `<td>${esc(s[c.key] || '')}</td>`).join('') + '</tr>').join('')
     + '</tbody></table>';
 }
 
@@ -2746,22 +2791,18 @@ const GUIDES = {
       ['p', 'The song library comes from a spreadsheet: an Excel workbook (.xlsx) - or a CSV file, see Help ▸ Using a CSV File Instead. Each row is one song, and each song name can carry a link to its songsheet (PDF).'],
       ['tip', 'Quickest start: click “Create Template Spreadsheet” below, fill it in, then open it with File ▸ Open Song Database.'],
       ['h2', '1.  The column headings (row 1)'],
-      ['p', 'Put these headings in the first row of the first worksheet. Capitals don\'t matter and the columns can be in any order.'],
+      ['p', 'Put the headings in the first row of the first worksheet. Use whatever headings and columns suit your band - JJ\'s Setlist shows, searches and prints them under your own heading names, in the same order as the sheet. For example:'],
       ['code', 'SONG NAME      Artist      Style      Vocalist'],
-      ['b', 'SONG NAME - required. The title as you want it shown.'],
-      ['b', 'Artist - optional. Original artist or band.'],
-      ['b', 'Style - optional. e.g. Ballad, 60\'s  ·  Rock  ·  Latin'],
-      ['b', 'Vocalist - optional. Who sings it.'],
-      ['p', 'Other accepted heading names:'],
-      ['b', 'SONG NAME:  Title, Song, Song Title, Name, Track'],
-      ['b', 'Artist:  Band, Performer, Original Artist'],
-      ['b', 'Style:  Genre, Type'],
-      ['b', 'Vocalist:  Singer, Vocals, Vocal, Lead Vocal'],
-      ['p', 'Any other columns (notes, keys, etc.) are simply ignored, so you can keep extra information in the sheet.'],
+      ['code', 'Song Name      Composer      Key      Format      Year'],
+      ['b', 'SONG NAME - required. The title as you want it shown. Also accepted: Title, Song, Song Title, Name, Track. With none of those, the first column is the song name.'],
+      ['b', 'The column after the song name is shown next to it in the library (e.g.  El Paso  —  Marty Robbins); the rest are shown after it in [brackets].'],
+      ['b', 'Songs are told apart by their name and their Artist column (also accepted: Band, Performer, Original Artist, Composer, Songwriter, Writer), so two songs can share a name if their artists differ.'],
+      ['b', 'A column with no heading, or with nothing in it, is left out.'],
+      ['p', 'Capitals don\'t matter, and you can add, remove or rearrange columns at any time - just open the spreadsheet again.'],
       ['h2', '2.  One song per row'],
       ['b', 'Start on row 2, one song per row. Empty rows are skipped.'],
       ['b', 'If you have two versions of a song, make the names different, e.g. “Scarborough Fair [v1]” and “Scarborough Fair [v2]”.'],
-      ['b', 'Style and Vocalist are searchable - type “Ballad” or a singer\'s name in the Search box.'],
+      ['b', 'Every column is searchable - e.g. type “Ballad” or a singer\'s name in the Search box.'],
       ['h2', '3.  Adding songsheet links'],
       ['p', 'Attach the link to the SONG NAME cell. Songs with a link show 📄 in the app.'],
       ['h3', 'Method A - Insert Link (recommended)'],
@@ -2812,10 +2853,10 @@ const GUIDES = {
       ['tip', 'Quickest start: click “Create Template CSV” below - it already has the right headings and a link column.'],
       ['tip', 'Already have an Excel sheet with links behind the names? Open it, then use File ▸ Export Song Database as CSV (with web links): every link is written into a Songsheet column, so none are lost.'],
       ['h2', '1.  The column headings (first line)'],
-      ['p', 'The same headings as the Excel version - any order, capitals don\'t matter, and extra columns are ignored:'],
+      ['p', 'Headings work just as in the Excel version - any headings you like, in any order, and capitals don\'t matter:'],
       ['code', 'SONG NAME,Artist,Style,Vocalist,Songsheet'],
       ['b', 'SONG NAME - required. Also accepted: Title, Song, Name, Track'],
-      ['b', 'Artist, Style, Vocalist - optional (same alternatives as Excel).'],
+      ['b', 'Any other columns (e.g. Artist, Style, Vocalist - or Composer, Key, Year) - optional, shown under their own headings.'],
       ['b', 'Songsheet - optional link column. Also accepted: Link, URL, PDF, Sheet, Chart'],
       ['h2', '2.  One song per line'],
       ['code', 'El Paso,Marty Robbins,Country,Adrian,https://drive.google.com/…\nBlue Moon,Nat King Cole,Ballad,Gary,Songsheets\\Blue Moon.pdf\nMoon River,Henry Mancini,Ballad,,'],
@@ -2944,7 +2985,8 @@ function helpShortcuts() {
 const TEMPLATE_STEPS = [
   'Open the template in Excel.',
   'Replace the example rows with your own songs - one song per row. '
-    + 'Only SONG NAME is required; Artist, Style and Vocalist are optional.',
+    + 'Only SONG NAME is required. Artist, Style and Vocalist are optional - rename them, '
+    + 'or add columns of your own (e.g. Key, Year), and they are shown under your headings.',
   'Optional - songsheet links: click a song name, press Ctrl+K, paste the web address '
     + 'of its PDF (e.g. a Google Drive or Dropbox link) and click OK.',
   'Save with Ctrl+S. Keep it as an Excel Workbook (.xlsx) - saving as CSV loses the links.',

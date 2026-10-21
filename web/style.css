@@ -260,8 +260,6 @@ dialog h3 { margin: 0 0 12px; font-size: 1.15rem; }
   .print-table td { padding: .6pt 4pt; border-bottom: .5pt solid #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .print-table tr { break-inside: avoid; }
   .print-table .n { width: 30pt; text-align: right; text-overflow: clip; }
-  .print-table .t { width: 40%; }
-  .print-table .a { width: 25%; }
 }
 
 /* ---------- song database: online copy (Google Drive / Dropbox) */
