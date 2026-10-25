@@ -742,9 +742,11 @@ async function loadCloudData() {
   const saved = store.get('space', null, accountPrefix());
   const wanted = saved === null ? (cloud.bands[0]?.id || '') : saved;
   cloud.band = cloud.bands.find((b) => b.id === wanted) || null;
+  let resetAt = 0;                            // when the administrator last reset the band
   if (cloud.band) {
     try {
-      await cloud.db.collection('bands').doc(cloud.band.id).get();
+      const bandDoc = await cloud.db.collection('bands').doc(cloud.band.id).get();
+      resetAt = bandDoc.data()?.resetAt?.toMillis?.() || 0;
     } catch {                                 // removed from the band since
       const gone = cloud.band;
       cloud.band = null;
@@ -755,7 +757,12 @@ async function loadCloudData() {
     }
   }
   store.prefix = accountPrefix() + (cloud.band ? `b.${cloud.band.id}.` : '');
-  loadLocalState();                          // the unsaved setlist on screen, kept per account and space
+  // Reset since this browser last opened the band: forget what it kept of the old one.
+  if (resetAt > store.get('resetSeen', 0)) {
+    store.clear(store.prefix);
+    store.set('resetSeen', resetAt);
+  }
+  loadLocalState();                         // the unsaved setlist on screen, kept per account and space
 
   const root = cloudRoot();
   const [mySettings, bandSettings, libraryDoc, lists] = await Promise.all([
@@ -1361,7 +1368,8 @@ async function adminBands(message = '') {
              <button type="button" data-act="revoke" data-band="${esc(b.id)}">Revoke code</button>`
           : `<span class="muted">No invitation code - nobody can join.</span>
              <button type="button" data-act="new" data-band="${esc(b.id)}">Make a code</button>`}
-          <button type="button" data-act="members" data-band="${esc(b.id)}">Members…</button></div>
+          <button type="button" data-act="members" data-band="${esc(b.id)}">Members…</button>
+          <button type="button" data-act="reset" data-band="${esc(b.id)}">Reset band…</button></div>
       </div>`).join('') || '<p class="muted">No bands yet.</p>';
     const p = dialog('Bands & invitation codes', `<div class="admin">
         ${message ? `<p class="drive-result ok">${esc(message)}</p>` : ''}
@@ -1384,6 +1392,7 @@ async function adminBands(message = '') {
           message = await setBandCode(band, null);
         }
       } else if (ans.act === 'members') await adminMembers(band);
+      else if (ans.act === 'reset') message = await adminResetBand(band) || '';
     } catch (err) {
       message = '';
       await messageBox('Bands & invitation codes', cloudMessage(err));
@@ -1454,6 +1463,56 @@ async function adminMembers(band) {
       await cloud.db.collection('bands').doc(band.id).collection('members').doc(uid).delete();
     }
   }
+}
+
+/** Back to a brand-new band: delete its song library, band settings and setlists.
+    The band, its members and its invitation code stay. Asks twice: a confirmation,
+    then the band's name typed in full. */
+async function adminResetBand(band) {
+  const ref = cloud.db.collection('bands').doc(band.id);
+  const [data, lists] = await Promise.all([ref.collection('data').get(), ref.collection('setlists').get()]);
+  const lib = data.docs.find((d) => d.id === 'library')?.data();
+  if (!data.size && !lists.size) {
+    await messageBox('Reset band', `${band.name} has no song library, settings or setlists - it's already like a new band.`);
+    return null;
+  }
+  const what = [
+    lib ? `   •  the song library “${lib.name || 'Song database'}” (${plural(lib.songs?.length || 0, 'song')})` : '',
+    data.docs.some((d) => d.id !== 'library') ? '   •  the band\'s shared settings' : '',
+    lists.size ? `   •  ${plural(lists.size, 'saved setlist')}:\n${listed(lists.docs.map((d) => `   ${d.data().name || d.id}`), 8)}` : '',
+  ].filter(Boolean).join('\n');
+  if (!await confirmBox('Reset band - check 1 of 2', `Reset ${band.name} to a brand-new band?\n\nThis deletes, for every member:\n${what}\n\n`
+    + `Kept: the band, its ${plural(band.members, 'member')} and its invitation code. Members' own setlists aren't touched.\n\n`
+    + 'This cannot be undone.', 'Continue…')) return null;
+  const p = dialog('Reset band - check 2 of 2', `<div class="account-form">
+      <p>To confirm, type the band's name exactly: <b>${esc(band.name)}</b></p>
+      <input id="resetName" type="text" maxlength="60" autocomplete="off" spellcheck="false">
+      <p class="small muted">The Delete button works once the name matches.</p></div>`,
+  [{ label: 'Cancel', value: false, primary: true },
+    { label: 'Delete Everything', value: true, check: () => $('#resetName').value.trim() === band.name }], true);
+  const del = $('#dialogButtons').lastChild;
+  del.disabled = true;
+  $('#resetName').addEventListener('input', () => { del.disabled = $('#resetName').value.trim() !== band.name; });
+  $('#resetName').focus();
+  if (!await p) return null;
+  document.body.classList.add('busy');
+  try {
+    const docs = [...data.docs, ...lists.docs].map((d) => d.ref);
+    for (let i = 0; i < docs.length; i += 400) {            // a batch takes at most 500 writes
+      const batch = cloud.db.batch();
+      docs.slice(i, i + 400).forEach((r) => batch.delete(r));
+      await batch.commit();
+    }
+    // Tells each member's browser to forget its own unsaved copy of this band's setlist.
+    await ref.update({ resetAt: now() });
+  } finally {
+    document.body.classList.remove('busy');
+  }
+  if (cloud.band?.id === band.id) {           // it's open here: start it afresh
+    store.clear(store.prefix);
+    location.reload();
+  }
+  return `${band.name} has been reset. Its members will see it as a new band next time they open it.`;
 }
 
 /** Invitation requests: reply by email with a band's code, or delete. */
