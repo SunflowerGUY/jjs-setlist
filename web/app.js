@@ -729,12 +729,10 @@ async function loadCloudData() {
     throw err;
   }
   cloud.admin = admin;
-  // My bands. The administrator can open every band.
+  // My bands: the ones I joined with an invitation code (the administrator too).
   const mine = await cloudUserDoc().collection('bands').get();
-  const bands = new Map();
-  mine.forEach((d) => bands.set(d.id, d.data().name || d.id));
-  if (admin) (await cloud.db.collection('bands').get()).forEach((d) => bands.set(d.id, d.data().name || d.id));
-  cloud.bands = [...bands].map(([id, name]) => ({ id, name })).sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+  cloud.bands = mine.docs.map((d) => ({ id: d.id, name: d.data().name || d.id }))
+    .sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
   if (admin) pendingRequests().then((n) => { cloud.requests = n; renderAccount(); });
 
   // The space chosen last time on this computer - if I'm still in that band.
@@ -745,7 +743,10 @@ async function loadCloudData() {
   let resetAt = 0;                            // when the administrator last reset the band
   if (cloud.band) {
     try {
-      const bandDoc = await cloud.db.collection('bands').doc(cloud.band.id).get();
+      // Still on its member list? (The administrator can read any band, so ask the list.)
+      const ref = cloud.db.collection('bands').doc(cloud.band.id);
+      const [bandDoc, me] = await Promise.all([ref.get(), ref.collection('members').doc(cloud.user.uid).get()]);
+      if (!me.exists) throw new Error('not a member');
       resetAt = bandDoc.data()?.resetAt?.toMillis?.() || 0;
     } catch {                                 // removed from the band since
       const gone = cloud.band;
@@ -899,7 +900,7 @@ async function saveMyName(name) {
   await cloud.user.updateProfile({ displayName: name });
   const mine = await cloudUserDoc().collection('bands').get();
   await Promise.all(mine.docs.map((d) => cloud.db.collection('bands').doc(d.id).collection('members')
-    .doc(cloud.user.uid).update({ name }).catch(() => {})));   // not a member there (the administrator's own bands)
+    .doc(cloud.user.uid).update({ name }).catch(() => {})));   // no longer a member there
   renderAccount();
   renderStorage();
 }
@@ -978,7 +979,7 @@ function accountMenu() {
     { label: 'Join a band with an invitation code…', action: joinWithCode },
     ...(inBand ? [{ label: `Copy my own setlists into ${cloud.band.name}…`, action: copyMineIntoBand }] : []),
     { label: `Copy setlists from this computer into ${inBand ? cloud.band.name : 'my account'}…`, action: () => offerImport(false) },
-    ...(inBand && !cloud.admin ? [{ label: `Leave ${cloud.band.name}…`, action: leaveBand }] : []),
+    ...(inBand ? [{ label: `Leave ${cloud.band.name}…`, action: leaveBand }] : []),
     '-',
     { label: cloud.user.displayName ? 'Change my name…' : 'Add my name…', action: () => changeName() },
     ...(hasPassword ? [{ label: 'Change my password…', action: changePassword }] : []),
@@ -1219,7 +1220,7 @@ async function joinWithCode() {
   watchCodeBox($('#jnCode'), $('#jnResult'), (f) => { found = f; });
   $('#jnCode').focus();
   if (!await p || !found) return;
-  if (cloud.bands.some((b) => b.id === found.bandId) && !cloud.admin) {
+  if (cloud.bands.some((b) => b.id === found.bandId)) {
     messageBox('Join a band', `You're already in ${found.bandName}. Choose it in the band list at the top right.`);
     return;
   }
@@ -1289,7 +1290,7 @@ async function changePassword() {
 
 async function deleteAccount() {
   const mine = await cloudSetlists(cloudUserDoc()).catch(() => ({}));
-  const bands = cloud.bands.filter((b) => !cloud.admin);
+  const bands = cloud.bands;
   if (!await dialog('Delete my account',
     `Delete the account ${cloud.user.email || accountName()} and everything in it?\n\n`
     + `   •  your own ${plural(Object.keys(mine).length, 'saved setlist')}, song library and settings\n`
@@ -1303,7 +1304,7 @@ async function deleteAccount() {
     (await user.collection('setlists').get()).forEach((d) => batch.delete(d.ref));
     (await user.collection('bands').get()).forEach((d) => {
       batch.delete(d.ref);
-      if (!cloud.admin) batch.delete(db.collection('bands').doc(d.id).collection('members').doc(uid));
+      batch.delete(db.collection('bands').doc(d.id).collection('members').doc(uid));
     });
     batch.delete(user.collection('data').doc('settings'));
     batch.delete(user.collection('data').doc('library'));
@@ -1417,7 +1418,8 @@ async function adminCreateBand(bands, suggested = '') {
         ${note ? `<p class="drive-result bad">${esc(note)}</p>` : ''}
         <label for="bnName">Band name</label>
         <input id="bnName" type="text" maxlength="60" value="${esc(name)}" placeholder="e.g. Jelly Jazz">
-        <p class="small muted">You'll be its first member. An invitation code is made for it straight away, to send to the other members.</p></div>`,
+        <p class="small muted">An invitation code is made for it straight away, to send to its members.
+          You aren't a member yourself: to join it, use its code like everyone else (the menu under your name ▸ Join a band).</p></div>`,
     [{ label: 'Cancel', value: false }, { label: 'Create Band', value: true, primary: true, check: () => !!$('#bnName').value.trim() }], true);
     $('#bnName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); [...$('#dialogButtons').children].pop().click(); } });
     $('#bnName').focus();
@@ -1432,15 +1434,8 @@ async function adminCreateBand(bands, suggested = '') {
     const code = newInviteCode(), db = cloud.db, batch = db.batch();
     batch.set(db.collection('bands').doc(key), { name, key, inviteCode: code, created: now(), createdBy: cloud.user.uid });
     batch.set(db.collection('invites').doc(code), { bandId: key, bandName: name, created: now() });
-    batch.set(cloudUserDoc().collection('bands').doc(key), { name, joined: now() });
-    // The creator is its first member (so they're on its member list, by name).
-    batch.set(db.collection('bands').doc(key).collection('members').doc(cloud.user.uid),
-      { email: cloud.user.email || '', name: cloud.user.displayName || '', code, joined: now() });
     await batch.commit();
-    cloud.bands.push({ id: key, name });
-    cloud.bands.sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
-    renderSpacePicker();
-    return `Created ${name}, with you as its first member. Its invitation code is ${code} - use “Copy invitation” to send it to the other members.`;
+    return `Created ${name}. Its invitation code is ${code} - use “Copy invitation” to send it to its members.`;
   }
 }
 
@@ -2287,14 +2282,23 @@ let driveBusy = false;
 
 /** Load the song database from its online copy (Google Drive or Dropbox). On failure
     the song database already here stays in use - marked as the backup if the online copy should have
-    replaced it. startup: quieter messages when the app opens. */
-async function loadFromDrive({ startup = false } = {}) {
+    replaced it. startup: quieter messages when the app opens. auto: not asked for
+    from the menu (the link is mine, so it never goes into a band unasked). */
+async function loadFromDrive({ startup = false, auto = startup, asked = false } = {}) {
   if (!state.driveUrl) {
     status('Add a Google Drive or Dropbox link first: File ▸ Song Database Settings…');
     if (!startup) databaseSettings();
     return false;
   }
   if (driveBusy) return false;
+  if (mode === 'cloud' && cloud.band && !asked) {
+    if (auto) {
+      if (!startup) status(`Your online copy is loaded into your own setlists only - not into ${cloud.band.name}.`);
+      return false;
+    }
+    if (!await confirmBox('Load the online copy', `Replace ${cloud.band.name}'s song database with your online copy, for every member of the band?\n\n`
+      + `   ${state.driveUrl}\n\n${cloud.band.name}'s song database now:  “${state.dbName || 'none'}”`, 'Replace It')) return false;
+  }
   driveBusy = true;
   document.body.classList.add('busy');
   const site = onlineSite();
@@ -2314,7 +2318,7 @@ async function loadFromDrive({ startup = false } = {}) {
         + `Using the copy kept in this browser instead:\n\n   “${state.dbName}”, from ${dateTimeText(state.dbLoaded)}\n\n`
         + 'It may be missing recent changes.',
         [{ label: 'OK', value: false }, { label: 'Try Again', value: true, primary: true }]);
-      if (again) { driveBusy = false; return await loadFromDrive({ startup }); }
+      if (again) { driveBusy = false; return await loadFromDrive({ startup, asked: true }); }
     } else {
       status(`Couldn't load the song database from ${site}.`);
       await messageBox('Could not load the song database',
@@ -2340,7 +2344,7 @@ function databaseSettings() {
     <div id="driveResult" class="drive-result"></div>
     <p><strong>Which to use:</strong></p>
     <label class="choice"><input type="radio" name="driveFirst" value="1">
-      <span><b>The online copy first</b> - always the latest. It's loaded each time the app opens.
+      <span><b>The online copy first</b> - always the latest. It's loaded each time the app opens (into your own setlists, never a band's).
       If it can't be reached, the copy kept in this browser is used instead (marked ⚠ BACKUP).</span></label>
     <label class="choice"><input type="radio" name="driveFirst" value="0">
       <span><b>The spreadsheet I open on this computer.</b> The online copy is used when no song database is loaded,
@@ -2389,8 +2393,8 @@ function databaseSettings() {
     if (!link) { status('An online copy is no longer used for the song database.'); return; }
     status('Song Database Settings saved.');
     // Like the desktop app: load the online copy straight away when it's the first
-    // choice, the link is new, or nothing is loaded yet.
-    if (state.driveFirst || changed || !state.library.length) await loadFromDrive();
+    // choice, the link is new, or nothing is loaded yet - into my own space only.
+    if (state.driveFirst || changed || !state.library.length) await loadFromDrive({ auto: true });
   });
 }
 
