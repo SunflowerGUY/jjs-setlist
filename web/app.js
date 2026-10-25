@@ -731,8 +731,15 @@ async function loadCloudData() {
   cloud.admin = admin;
   // My bands: the ones I joined with an invitation code (the administrator too).
   const mine = await cloudUserDoc().collection('bands').get();
-  cloud.bands = mine.docs.map((d) => ({ id: d.id, name: d.data().name || d.id }))
-    .sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
+  const joined = mine.docs.map((d) => ({ id: d.id, name: d.data().name || d.id }));
+  // Still on each band's member list? (The administrator can read any band, so ask the list.)
+  // Removed since: take the band out of my list. Can't tell (e.g. offline): keep it.
+  const stillIn = await Promise.all(joined.map((b) => cloud.db.collection('bands').doc(b.id)
+    .collection('members').doc(cloud.user.uid).get()
+    .then((me) => me.exists, (err) => err?.code !== 'permission-denied')));
+  const gone = joined.filter((b, i) => !stillIn[i]);
+  gone.forEach((b) => cloudUserDoc().collection('bands').doc(b.id).delete().catch(() => {}));
+  cloud.bands = joined.filter((b, i) => stillIn[i]).sort((a, b) => fold(a.name).localeCompare(fold(b.name)));
   if (admin) pendingRequests().then((n) => { cloud.requests = n; renderAccount(); });
 
   // The space chosen last time on this computer - if I'm still in that band.
@@ -740,22 +747,16 @@ async function loadCloudData() {
   const saved = store.get('space', null, accountPrefix());
   const wanted = saved === null ? (cloud.bands[0]?.id || '') : saved;
   cloud.band = cloud.bands.find((b) => b.id === wanted) || null;
+  const left = gone.find((b) => b.id === wanted);
+  if (left) {                                 // removed from the band opened last time
+    store.set('space', '', accountPrefix());
+    cloud.notice = ['No longer in the band', `You're no longer a member of ${left.name}, so your own setlists are open instead.`];
+  }
   let resetAt = 0;                            // when the administrator last reset the band
   if (cloud.band) {
     try {
-      // Still on its member list? (The administrator can read any band, so ask the list.)
-      const ref = cloud.db.collection('bands').doc(cloud.band.id);
-      const [bandDoc, me] = await Promise.all([ref.get(), ref.collection('members').doc(cloud.user.uid).get()]);
-      if (!me.exists) throw new Error('not a member');
-      resetAt = bandDoc.data()?.resetAt?.toMillis?.() || 0;
-    } catch {                                 // removed from the band since
-      const gone = cloud.band;
-      cloud.band = null;
-      cloud.bands = cloud.bands.filter((b) => b.id !== gone.id);
-      cloudUserDoc().collection('bands').doc(gone.id).delete().catch(() => {});
-      store.set('space', '', accountPrefix());
-      cloud.notice = ['No longer in the band', `You're no longer a member of ${gone.name}, so your own setlists are open instead.`];
-    }
+      resetAt = (await cloud.db.collection('bands').doc(cloud.band.id).get()).data()?.resetAt?.toMillis?.() || 0;
+    } catch { /* offline: no reset to catch up on */ }
   }
   store.prefix = accountPrefix() + (cloud.band ? `b.${cloud.band.id}.` : '');
   // Reset since this browser last opened the band: forget what it kept of the old one.
